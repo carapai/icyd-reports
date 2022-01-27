@@ -8,12 +8,14 @@ import {
   isBefore,
   differenceInMonths,
   format,
+  sub,
+  subYears,
 } from "date-fns";
 import { setSelectedOrgUnits, setUserOrgUnits, changeTotal } from "./Events";
 
 const findAgeGroup = (age: number) => {
   if (age <= 0) {
-    return "< 0";
+    return "< 1";
   }
 
   if (age > 0 && age <= 4) {
@@ -74,7 +76,26 @@ const mostCurrentEvent = (events: any[], programStage: string, end: Date) => {
   return maxBy(riskAssessments, "eventDate");
 };
 
-const eventWithinQuarter = (
+const mostCurrentEventB4Year = (
+  events: any[],
+  programStage: string,
+  end: Date
+) => {
+  const riskAssessments = events.filter(
+    (e: any) =>
+      e.programStage === programStage && isBefore(end, parseISO(e.eventDate))
+  );
+  return maxBy(riskAssessments, "eventDate");
+};
+
+const anyMostCurrentEvent = (events: any[], programStage: string) => {
+  const riskAssessments = events.filter(
+    (e: any) => e.programStage === programStage
+  );
+  return maxBy(riskAssessments, "eventDate");
+};
+
+const eventWithinPeriod = (
   events: any[],
   programStage: string,
   start: Date,
@@ -88,7 +109,7 @@ const eventWithinQuarter = (
   return maxBy(riskAssessments, "eventDate");
 };
 
-const eventsWithinQuarter = (
+const eventsWithinPeriod = (
   events: any[],
   programStage: string,
   start: Date,
@@ -187,9 +208,40 @@ const allHaveValue = (
   value: any
 ) => {
   if (event) {
-    const de = dataElements.map((de: string) => event[de]);
-    const result = every(de, (v) => v === value);
+    const de = dataElements
+      .map((de: string) => event[de])
+      .filter((v) => v !== undefined);
+    const result =
+      every(de, (v) => v === value) && de.length === dataElements.length;
+    console.log(result);
     return result;
+  }
+  return false;
+};
+
+const checkRiskAssessment = (
+  event: any | undefined,
+  dataElements: string[],
+  value: any
+) => {
+  if (event) {
+    const de = dataElements
+      .map((de: string) => event[de])
+      .filter((v) => v !== undefined);
+    if (de.length === 0) {
+      return 0;
+    } else if (de.length < dataElements.length) {
+      if (de.indexOf("true") === -1) {
+        return 0;
+      }
+      return 1;
+    } else if (
+      de.length === dataElements.length &&
+      every(de, (v) => v === value)
+    ) {
+      return 2;
+    }
+    return 3;
   }
   return false;
 };
@@ -261,7 +313,7 @@ export const processInstances = async (
         fields: "*",
         ou,
         ouMode: "DESCENDANTS",
-        trackedEntityType: "SXQEqYXKejK",
+        program: "HEWq6yr4cs5",
         trackedEntityInstance: uniq(currentData).join(";"),
         skipPaging: "true",
       },
@@ -394,27 +446,29 @@ export const processInstances = async (
         { start: quarterStart, end: quarterEnd }
       );
 
-      const currentRiskAssessment = mostCurrentEvent(
+      const anyViralLoad = anyMostCurrentEvent(allEvents, "kKlAyGUnCML");
+      const currentRiskAssessment = eventWithinPeriod(
         allEvents,
         "B9EI27lmQrZ",
+        subYears(quarterEnd, 1),
         quarterEnd
       );
-      const currentAVat = mostCurrentEvent(
-        allEvents,
-        "TuLJEpHu0um",
-        quarterEnd
-      );
-      const currentHomeVisit = mostCurrentEvent(
-        allEvents,
-        "HaaSLv2ur0l",
-        quarterEnd
-      );
-      const currentVL = mostCurrentEvent(allEvents, "kKlAyGUnCML", quarterEnd);
-      const currentPlanning = mostCurrentEvent(
-        allEvents,
-        "LATgKmbf7Yv",
-        quarterEnd
-      );
+      // const currentAVat = mostCurrentEvent(
+      //   allEvents,
+      //   "TuLJEpHu0um",
+      //   quarterEnd
+      // );
+      // const currentHomeVisit = mostCurrentEvent(
+      //   allEvents,
+      //   "HaaSLv2ur0l",
+      //   quarterEnd
+      // );
+      // const currentVL = mostCurrentEvent(allEvents, "kKlAyGUnCML", quarterEnd);
+      // const currentPlanning = mostCurrentEvent(
+      //   allEvents,
+      //   "LATgKmbf7Yv",
+      //   quarterEnd
+      // );
 
       const currentReferral = mostCurrentEvent(
         allEvents,
@@ -432,55 +486,55 @@ export const processInstances = async (
         quarterEnd
       );
 
-      const aVatDuringQuarter = eventsWithinQuarter(
+      const aVatDuringQuarter = eventsWithinPeriod(
         allEvents,
         "TuLJEpHu0um",
         quarterStart,
         quarterEnd
       );
-      const homeVisitsDuringQuarter = eventsWithinQuarter(
+      const homeVisitsDuringQuarter = eventsWithinPeriod(
         allEvents,
         "HaaSLv2ur0l",
         quarterStart,
         quarterEnd
       );
-      const viralLoadDuringQuarter = eventsWithinQuarter(
+      const viralLoadDuringQuarter = eventsWithinPeriod(
         allEvents,
         "kKlAyGUnCML",
         quarterStart,
         quarterEnd
       );
-      const casePlanningDuringQuarter = eventsWithinQuarter(
+      const casePlanningDuringQuarter = eventsWithinPeriod(
         allEvents,
         "LATgKmbf7Yv",
         quarterStart,
         quarterEnd
       );
-      const serviceProvisionDuringQuarter = eventsWithinQuarter(
+      const serviceProvisionDuringQuarter = eventsWithinPeriod(
         allEvents,
         "yz3zh5IFEZm",
         quarterStart,
         quarterEnd
       );
-      const groupActivitiesDuringQuarter = eventsWithinQuarter(
+      const groupActivitiesDuringQuarter = eventsWithinPeriod(
         allEvents,
         "EVkAS8LJNbO",
         quarterStart,
         quarterEnd
       );
-      const serviceLinkagesDuringQuarter = eventsWithinQuarter(
+      const serviceLinkagesDuringQuarter = eventsWithinPeriod(
         allEvents,
         "SxnXrDtSJZp",
         quarterStart,
         quarterEnd
       );
-      const riskAssessmentDuringQuarter = eventsWithinQuarter(
+      const riskAssessmentsDuringYear = eventsWithinPeriod(
         allEvents,
         "B9EI27lmQrZ",
-        quarterStart,
+        subYears(quarterEnd, 1),
         quarterEnd
       );
-      const referralsDuringQuarter = eventsWithinQuarter(
+      const referralsDuringQuarter = eventsWithinPeriod(
         allEvents,
         "yz3zh5IFEZm",
         quarterStart,
@@ -566,18 +620,7 @@ export const processInstances = async (
         };
       }
 
-      const isAtRisk = hasAYes(currentRiskAssessment, [
-        "WlTMjkcP6gv",
-        "Y8kX45XGXXI",
-        "NN0M618qUFX",
-        "MH5BGP1Ww2Q",
-        "p3FSiLQ1q6T",
-        "x1bL4w5EsPL",
-        "dunvFwnbGQF",
-        "oI9btGSwA7P",
-      ]);
-
-      const isNotAtRiskAdult = allHaveValue(
+      const isNotAtRiskAdult = checkRiskAssessment(
         currentRiskAssessment,
         [
           "WwMOTHl2cOz",
@@ -592,7 +635,7 @@ export const processInstances = async (
         ],
         "false"
       );
-      const isNotAtRisk = allHaveValue(
+      const isNotAtRisk = checkRiskAssessment(
         currentRiskAssessment,
         [
           "WlTMjkcP6gv",
@@ -611,7 +654,7 @@ export const processInstances = async (
         "EDa2GQUCbsx"
       );
       const unknownOther = findAnyEventValue(
-        riskAssessmentsBe4Quarter,
+        riskAssessmentsDuringYear,
         "cTV8aMqnVbe"
       );
       const testedForHIV = specificDataElement(
@@ -632,7 +675,6 @@ export const processInstances = async (
       }
       const ageGroup: any = child["RDEklSXCD4C.N1nMqKtYKvI"];
       const hVatDate: any = child["HEWq6yr4cs5.enrollmentDate"];
-      const phase: any = child["HEWq6yr4cs5.jiuPVqetSaV"];
       const age = differenceInYears(quarterEnd, parseISO(ageGroup));
       if (ageGroup && ageGroup.length === 10) {
         child = { ...child, [`RDEklSXCD4C.ageGroup`]: findAgeGroup(age) };
@@ -653,17 +695,13 @@ export const processInstances = async (
       if (
         child["hivStatus"] &&
         child["hivStatus"] !== "+" &&
-        riskAssessmentDuringQuarter.length > 0
+        riskAssessmentsDuringYear.length > 0
       ) {
         child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.vBqh2aiuHOV`]: 1 };
       } else {
         child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.vBqh2aiuHOV`]: 0 };
       }
-      if (age < 18 && isAtRisk) {
-        child = { ...child, isAtRisk: 1 };
-      } else {
-        child = { ...child, isAtRisk: 0 };
-      }
+
       if (age < 18 && reasonForReferral && reasonForReferral === "") {
         child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.reason`]: 1 };
       } else {
@@ -674,27 +712,13 @@ export const processInstances = async (
       } else {
         child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.hivResult`]: 0 };
       }
-      if (isNotAtRisk) {
-        child = { ...child, isNotAtRisk: 1 };
-      } else {
-        child = { ...child, isNotAtRisk: 0 };
-      }
-      if (age < 18 && unknownOther) {
-        child = {
-          ...child,
-          unknown: unknownOther,
-        };
-      } else {
-        child = { ...child, unknown: "" };
-      }
+
       if (age < 18 && testedForHIV) {
         child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 1 };
       } else {
         child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 0 };
       }
-      child = { ...child, [`newlyPositive`]: 0 };
-      child = { ...child, [`newlyTestedPositive`]: 0 };
-      child = { ...child, [`newlyTestedAndOnArt`]: 0 };
+
       child = {
         ...child,
         riskFactor:
@@ -730,22 +754,35 @@ export const processInstances = async (
         ),
       };
 
-      const hivStatusReferral = findAnyEventValue(
-        referralsBe4Quarter,
-        "PpUByWk3p8N"
+      // const hivStatusReferral = findAnyEventValue(
+      //   referralsBe4Quarter,
+      //   "PpUByWk3p8N"
+      // );
+      // const hivStatusRiskAssessment = findAnyEventValue(
+      //   riskAssessmentsBe4Quarter,
+      //   "vBqh2aiuHOV"
+      // );
+      // const hivStatusVL = findAnyEventValue(
+      //   viralLoadsBe4Quarter,
+      //   "PpUByWk3p8N"
+      // );
+      const homeVisitor = findAnyEventValue(
+        homeVisitsBe4Quarter,
+        "i6XGAmzx3Ri"
       );
-      const hivStatusRiskAssessment = findAnyEventValue(
-        riskAssessmentsBe4Quarter,
-        "vBqh2aiuHOV"
-      );
-      const hivStatusVL = findAnyEventValue(
-        viralLoadsBe4Quarter,
-        "PpUByWk3p8N"
+      const homeVisitorContact = findAnyEventValue(
+        homeVisitsBe4Quarter,
+        "BMzryoryhtX"
       );
 
-      child = { ...child, artNo: "" };
-      child = { ...child, onArt: "" };
-      child = { ...child, facility: "" };
+      child = {
+        ...child,
+        homeVisitor,
+        onArt: "",
+        facility: "",
+        artNo: "",
+        homeVisitorContact,
+      };
 
       if (
         viralLoadsBe4Quarter.length > 0 &&
@@ -836,12 +873,22 @@ export const processInstances = async (
               ...child,
               ovcEligible: 1,
             };
+          } else if (!!lastViralLoadDate) {
+            child = {
+              ...child,
+              ovcEligible: 1,
+            };
           } else {
             child = {
               ...child,
               ovcEligible: "NE",
             };
           }
+        } else if (!!lastViralLoadDate) {
+          child = {
+            ...child,
+            ovcEligible: 1,
+          };
         } else {
           child = {
             ...child,
@@ -1024,7 +1071,7 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`iac`]: anyEventWithDataElement(
+        iac: anyEventWithDataElement(
           viralLoadDuringQuarter,
           "iHdNYfm1qlz",
           "true"
@@ -1034,7 +1081,7 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`eMTCT`]:
+        eMTCT:
           anyEventWithDE(homeVisitsDuringQuarter, "SrEP2vZtMHV") ||
           anyEventWithDE(homeVisitsDuringQuarter, "ffxCn2msT1R")
             ? 1
@@ -1372,6 +1419,87 @@ export const processInstances = async (
           OVC_HIV_STAT: 0,
         };
       }
+      if (riskAssessmentsDuringYear.length > 0 && child.hivStatus !== "+") {
+        child = { ...child, riskAssessment: 1 };
+      } else if (child.hivStatus === "+") {
+        child = { ...child, riskAssessment: "" };
+        child = { ...child, isAtRisk: "" };
+      } else {
+        child = { ...child, riskAssessment: 0 };
+        child = { ...child, isAtRisk: 0 };
+      }
+      if (child.riskAssessment === 1) {
+        if (age < 18 && (isNotAtRisk === 0 || isNotAtRisk === 2)) {
+          child = { ...child, isAtRisk: 0 };
+        } else if (
+          age >= 18 &&
+          (isNotAtRiskAdult === 0 || isNotAtRiskAdult === 2)
+        ) {
+          child = { ...child, isAtRisk: 0 };
+        } else if (
+          isNotAtRisk === 1 ||
+          isNotAtRiskAdult === 1 ||
+          isNotAtRiskAdult === 3 ||
+          isNotAtRisk === 3
+        ) {
+          child = { ...child, isAtRisk: 1 };
+        }
+      }
+
+      if (child.hivStatus !== "+") {
+        if (isNotAtRisk === 2 || isNotAtRiskAdult === 2) {
+          child = { ...child, isNotAtRisk: 1 };
+        } else {
+          child = { ...child, isNotAtRisk: 0 };
+        }
+      }
+
+      if (
+        child.hivStatus !== "+" &&
+        child.hivStatus !== "-" &&
+        child.isNotAtRisk !== 1
+      ) {
+        if (!!unknownOther) {
+          child = {
+            ...child,
+            unknown: unknownOther,
+          };
+        } else {
+          child = { ...child, unknown: "Other reasons" };
+        }
+      } else if (
+        child.hivStatus === "+" ||
+        child.hivStatus === "-" ||
+        child.isNotAtRisk === 1
+      ) {
+        child = { ...child, unknown: "" };
+      }
+
+      if (child.newlyEnrolled === "Yes" && child.hivStatus === "+") {
+        child = { ...child, newlyPositive: 1 };
+      } else if (child.hivStatus === "+") {
+        child = { ...child, newlyPositive: 0 };
+      }
+
+      if (
+        child.newlyPositive &&
+        !!artStartDate &&
+        isWithinInterval(parseISO(artStartDate), {
+          start: quarterStart,
+          end: quarterEnd,
+        })
+      ) {
+        child = { ...child, newlyTestedPositive: 1 };
+      } else if (child.hivStatus === "+") {
+        child = { ...child, newlyTestedPositive: 0 };
+      }
+      const currentArtStartDate = anyViralLoad?.["epmIBD8gh7G"];
+
+      child = {
+        ...child,
+        newlyTestedAndOnArt: child.newlyTestedPositive,
+        artStartDate: currentArtStartDate,
+      };
 
       return child;
     }
@@ -1404,9 +1532,10 @@ export const useTracker = (
               fields: "*",
               ou: organisationUnits.join(";"),
               ouMode: "DESCENDANTS",
+              filter: `HLKc2AKR9jW:NE:""`,
               page,
               pageSize,
-              trackedEntityType: "UpbYgM3gwhn",
+              program: "RDEklSXCD4C",
               totalPages: true,
             },
           },

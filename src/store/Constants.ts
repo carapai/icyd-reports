@@ -1,6 +1,6 @@
 import { Column } from "./../interfaces";
 export const columns: Column[] = [
-  { display: "Instance", id: "trackedEntityInstance", selected: true },
+  // { display: "Instance", id: "trackedEntityInstance", selected: true },
   { display: "Beneficiary ID", id: "RDEklSXCD4C.HLKc2AKR9jW", selected: true },
   {
     display: "Old Beneficiary ID",
@@ -63,7 +63,7 @@ export const columns: Column[] = [
   { display: "HIV_Status(+,-,?, -/+)", id: "hivStatus", selected: true },
   {
     display: "OVC_TST ASSESS",
-    id: "RDEklSXCD4C.B9EI27lmQrZ.vBqh2aiuHOV",
+    id: "riskAssessment",
     selected: true,
   },
   {
@@ -117,7 +117,9 @@ export const columns: Column[] = [
     id: "newlyTestedAndOnArt",
     selected: true,
   },
-  { display: "ART No", id: "artNo", selected: true },
+  { display: "Date of ART initiation", id: "artStartDate", selected: true },
+  { display: "ART_No_HVAT", id: "RDEklSXCD4C.n7VQaJ8biOJ", selected: true },
+  { display: "ART_No_VL", id: "artNo", selected: true },
   {
     display: "On_ART_HVAT (1 Yes, 0 No)",
     id: "RDEklSXCD4C.umqeJCVp4Zq",
@@ -273,4 +275,10 @@ export const columns: Column[] = [
     selected: true,
   },
   { display: "Transferred to Other IP", id: "otherIP", selected: true },
+  { display: "Para-social Worker", id: "homeVisitor", selected: true },
+  {
+    display: "Telephone No. of Para-social Worker",
+    id: "homeVisitorContact",
+    selected: true,
+  },
 ];
