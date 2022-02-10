@@ -73,12 +73,12 @@ export const columns: Column[] = [
   },
   {
     display: "OVC_TST REFER",
-    id: "RDEklSXCD4C.yz3zh5IFEZm.reason",
+    id: "OVC_TST_REFER",
     selected: true,
   },
   {
     display: "OVC_TST REPORT",
-    id: "RDEklSXCD4C.yz3zh5IFEZm.hivResult",
+    id: "OVC_TST_REPORT",
     selected: true,
   },
   {
@@ -93,12 +93,12 @@ export const columns: Column[] = [
   },
   {
     display: "Linked to HTS (referred for Testing) (1 Yes, 0 No)",
-    id: "RDEklSXCD4C.B9EI27lmQrZ.linked",
+    id: "linked",
     selected: true,
   },
   {
     display: "Tested for HIV (1 Yes, 0 No)",
-    id: "RDEklSXCD4C.B9EI27lmQrZ.testedForHIV",
+    id: "testedForHIV",
     selected: true,
   },
   {

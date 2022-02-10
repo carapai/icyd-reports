@@ -21,7 +21,7 @@ export const $store = domain
     selectedProgram: "RDEklSXCD4C",
     program: {},
     total: 0,
-    period: moment().subtract(1, "quarters"),
+    period: moment(),
     columns: columns,
   })
   .on(setUserOrgUnits, (state, userOrgUnits) => {

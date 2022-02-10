@@ -46,7 +46,7 @@ const DataSetLayerTable = () => {
       inner: INNER_LIMIT,
     },
     initialState: {
-      pageSize: 20,
+      pageSize: 200,
       currentPage: 1,
     },
   });

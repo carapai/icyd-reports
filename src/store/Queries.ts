@@ -1,17 +1,15 @@
-import { useQuery } from "react-query";
 import { useDataEngine } from "@dhis2/app-runtime";
-import { uniq, fromPairs, maxBy, every, sortBy, has } from "lodash";
 import {
-  differenceInYears,
-  parseISO,
-  isWithinInterval,
-  isBefore,
   differenceInMonths,
-  format,
-  sub,
+  differenceInYears,
+  isBefore,
+  isWithinInterval,
+  parseISO,
   subYears,
 } from "date-fns";
-import { setSelectedOrgUnits, setUserOrgUnits, changeTotal } from "./Events";
+import { every, fromPairs, has, maxBy, sortBy, uniq } from "lodash";
+import { useQuery } from "react-query";
+import { changeTotal, setSelectedOrgUnits, setUserOrgUnits } from "./Events";
 
 const findAgeGroup = (age: number) => {
   if (age <= 0) {
@@ -68,45 +66,16 @@ const isAtSchool = (
   return "NA";
 };
 
-const mostCurrentEvent = (events: any[], programStage: string, end: Date) => {
-  const riskAssessments = events.filter(
-    (e: any) =>
-      e.programStage === programStage && isBefore(end, parseISO(e.eventDate))
-  );
-  return maxBy(riskAssessments, "eventDate");
+const mostCurrentEvent = (events: any[]) => {
+  return maxBy(events, "eventDate");
 };
 
-const mostCurrentEventB4Year = (
-  events: any[],
-  programStage: string,
-  end: Date
-) => {
-  const riskAssessments = events.filter(
-    (e: any) =>
-      e.programStage === programStage && isBefore(end, parseISO(e.eventDate))
-  );
-  return maxBy(riskAssessments, "eventDate");
-};
-
-const anyMostCurrentEvent = (events: any[], programStage: string) => {
-  const riskAssessments = events.filter(
-    (e: any) => e.programStage === programStage
-  );
-  return maxBy(riskAssessments, "eventDate");
-};
-
-const eventWithinPeriod = (
-  events: any[],
-  programStage: string,
-  start: Date,
-  end: Date
-) => {
-  const riskAssessments = events.filter(
-    (e: any) =>
-      e.programStage === programStage &&
-      isWithinInterval(parseISO(e.eventDate), { start, end })
-  );
-  return maxBy(riskAssessments, "eventDate");
+const eventsBeforePeriod = (events: any[], programStage: string, end: Date) => {
+  return events.filter((e: any) => {
+    return (
+      e.programStage === programStage && isBefore(parseISO(e.eventDate), end)
+    );
+  });
 };
 
 const eventsWithinPeriod = (
@@ -123,13 +92,6 @@ const eventsWithinPeriod = (
   });
 };
 
-const eventsBe4Quarter = (events: any[], programStage: string, end: Date) => {
-  return events.filter(
-    (e: any) =>
-      e.programStage === programStage && isBefore(parseISO(e.eventDate), end)
-  );
-};
-
 const findAnyEventValue = (events: any[], dataElement: string) => {
   const sortedEvents = sortBy(events, (e: any) => e.eventDate).reverse();
   const event = sortedEvents.find(
@@ -141,13 +103,16 @@ const findAnyEventValue = (events: any[], dataElement: string) => {
   return null;
 };
 
-const findHIVStatus = (value: string, addition: string = "") => {
-  const allValues: { [key: string]: string } = {
-    Positive: `${addition}+`,
-    Negative: `${addition}-`,
-    DK: `${addition}DK`,
-  };
-  return allValues[value] || "";
+const allValues4DataElement = (
+  events: any[],
+  dataElement: string,
+  value: string
+) => {
+  if (events.length > 0) {
+    return events.every((e: any) => e[dataElement] === value);
+  }
+
+  return true;
 };
 
 const anyEventWithDataElement = (
@@ -213,7 +178,6 @@ const allHaveValue = (
       .filter((v) => v !== undefined);
     const result =
       every(de, (v) => v === value) && de.length === dataElements.length;
-    console.log(result);
     return result;
   }
   return false;
@@ -244,6 +208,21 @@ const checkRiskAssessment = (
     return 3;
   }
   return false;
+};
+
+const hasDataElementWithinPeriod = (
+  events: any[],
+  dataElement: string,
+  value: string
+) => {
+  return !!events.find((e: any) => e[dataElement] === value);
+};
+
+const deHasAnyValue = (de: any, values: string[]) => {
+  if (de && values.indexOf(de) !== -1) {
+    return 1;
+  }
+  return 0;
 };
 
 export function useLoader() {
@@ -446,52 +425,30 @@ export const processInstances = async (
         { start: quarterStart, end: quarterEnd }
       );
 
-      const anyViralLoad = anyMostCurrentEvent(allEvents, "kKlAyGUnCML");
-      const currentRiskAssessment = eventWithinPeriod(
+      // One Year before quarter end
+
+      const riskAssessmentsDuringYear = eventsWithinPeriod(
         allEvents,
         "B9EI27lmQrZ",
         subYears(quarterEnd, 1),
         quarterEnd
       );
-      // const currentAVat = mostCurrentEvent(
-      //   allEvents,
-      //   "TuLJEpHu0um",
-      //   quarterEnd
-      // );
-      // const currentHomeVisit = mostCurrentEvent(
-      //   allEvents,
-      //   "HaaSLv2ur0l",
-      //   quarterEnd
-      // );
-      // const currentVL = mostCurrentEvent(allEvents, "kKlAyGUnCML", quarterEnd);
-      // const currentPlanning = mostCurrentEvent(
-      //   allEvents,
-      //   "LATgKmbf7Yv",
-      //   quarterEnd
-      // );
-
-      const currentReferral = mostCurrentEvent(
+      const referralsDuringYear = eventsWithinPeriod(
         allEvents,
         "yz3zh5IFEZm",
-        quarterEnd
-      );
-      const currentGroupActivity = mostCurrentEvent(
-        allEvents,
-        "EVkAS8LJNbO",
-        quarterEnd
-      );
-      const currentServiceLinkage = mostCurrentEvent(
-        allEvents,
-        "SxnXrDtSJZp",
+        subYears(quarterEnd, 1),
         quarterEnd
       );
 
-      const aVatDuringQuarter = eventsWithinPeriod(
+      // During Quarter
+
+      const referralsDuringQuarter = eventsWithinPeriod(
         allEvents,
-        "TuLJEpHu0um",
+        "yz3zh5IFEZm",
         quarterStart,
         quarterEnd
       );
+
       const homeVisitsDuringQuarter = eventsWithinPeriod(
         allEvents,
         "HaaSLv2ur0l",
@@ -504,21 +461,10 @@ export const processInstances = async (
         quarterStart,
         quarterEnd
       );
-      const casePlanningDuringQuarter = eventsWithinPeriod(
-        allEvents,
-        "LATgKmbf7Yv",
-        quarterStart,
-        quarterEnd
-      );
+
       const serviceProvisionDuringQuarter = eventsWithinPeriod(
         allEvents,
         "yz3zh5IFEZm",
-        quarterStart,
-        quarterEnd
-      );
-      const groupActivitiesDuringQuarter = eventsWithinPeriod(
-        allEvents,
-        "EVkAS8LJNbO",
         quarterStart,
         quarterEnd
       );
@@ -528,56 +474,44 @@ export const processInstances = async (
         quarterStart,
         quarterEnd
       );
-      const riskAssessmentsDuringYear = eventsWithinPeriod(
-        allEvents,
-        "B9EI27lmQrZ",
-        subYears(quarterEnd, 1),
-        quarterEnd
-      );
-      const referralsDuringQuarter = eventsWithinPeriod(
-        allEvents,
-        "yz3zh5IFEZm",
-        quarterStart,
-        quarterEnd
-      );
 
-      const referralsBe4Quarter = eventsBe4Quarter(
+      // Before or during quarter starts
+
+      const referralsBe4Quarter = eventsBeforePeriod(
         allEvents,
         "yz3zh5IFEZm",
         quarterEnd
       );
 
-      const aVatsBe4Quarter = eventsBe4Quarter(
+      const previousReferrals = eventsBeforePeriod(
         allEvents,
-        "TuLJEpHu0um",
-        quarterEnd
+        "yz3zh5IFEZm",
+        quarterStart
       );
 
-      const homeVisitsBe4Quarter = eventsBe4Quarter(
+      const previousViralLoads = eventsBeforePeriod(
+        allEvents,
+        "yz3zh5IFEZm",
+        quarterStart
+      );
+
+      const homeVisitsBe4Quarter = eventsBeforePeriod(
         allEvents,
         "HaaSLv2ur0l",
         quarterEnd
       );
-      const viralLoadsBe4Quarter = eventsBe4Quarter(
+      console.log(homeVisitsBe4Quarter);
+      const viralLoadsBe4Quarter = eventsBeforePeriod(
         allEvents,
         "kKlAyGUnCML",
         quarterEnd
       );
-      const casePlansBe4Quarter = eventsBe4Quarter(
-        allEvents,
-        "LATgKmbf7Yv",
-        quarterEnd
-      );
-      const serviceProvisionsBe4Quarter = eventsBe4Quarter(
-        allEvents,
-        "yz3zh5IFEZm",
-        quarterEnd
-      );
-      const riskAssessmentsBe4Quarter = eventsBe4Quarter(
-        allEvents,
-        "B9EI27lmQrZ",
-        quarterEnd
-      );
+
+      const currentRiskAssessment = mostCurrentEvent(riskAssessmentsDuringYear);
+      const currentReferral = mostCurrentEvent(referralsDuringYear);
+      const referralThisQuarter = mostCurrentEvent(referralsDuringQuarter);
+      const anyViralLoad = mostCurrentEvent(viralLoadsBe4Quarter);
+      const hivResult = specificDataElement(currentReferral, "XTdRWh5MqPw");
 
       child = {
         ...child,
@@ -594,16 +528,14 @@ export const processInstances = async (
           ...child,
           hivStatus: "+",
         };
-      } else if (currentReferral && !!currentReferral["vBqh2aiuHOV"]) {
+      } else if (hivResult) {
         child = {
           ...child,
           hivStatus:
-            currentReferral["vBqh2aiuHOV"] === "Positive"
+            hivResult === "Positive"
               ? "+"
-              : currentReferral["vBqh2aiuHOV"] === "Negative"
+              : hivResult === "Negative"
               ? "-"
-              : currentReferral["vBqh2aiuHOV"] === "Dont Know (DK)"
-              ? "DK"
               : "",
         };
       } else {
@@ -649,24 +581,36 @@ export const processInstances = async (
         ],
         "false"
       );
-      const reasonForReferral = specificDataElement(
-        referralsDuringQuarter,
-        "EDa2GQUCbsx"
+      const serviceProvided = specificDataElement(
+        currentReferral,
+        "XWudTD2LTUQ"
+      );
+      const serviceProvidedThisQuarter = specificDataElement(
+        referralThisQuarter,
+        "XWudTD2LTUQ"
       );
       const unknownOther = findAnyEventValue(
         riskAssessmentsDuringYear,
         "cTV8aMqnVbe"
       );
-      const testedForHIV = specificDataElement(
-        currentRiskAssessment,
-        "XWudTD2LTUQ"
-      );
 
-      const hivResult = anyEventWithDataElement(
-        referralsBe4Quarter,
-        "yz3zh5IFEZm",
-        ""
-      );
+      child = {
+        ...child,
+        linked: deHasAnyValue(serviceProvidedThisQuarter, [
+          "Started HIV treatment",
+          "PEP",
+          "HCT/ Tested for HIV",
+          "Intensive Adherence Counseling (IAC)",
+          "Viral Load Testing",
+          "Provided with ARVs",
+        ]),
+      };
+
+      if (serviceProvidedThisQuarter === "HCT/ Tested for HIV") {
+        child = { ...child, testedForHIV: 1 };
+      } else {
+        child = { ...child, testedForHIV: 0 };
+      }
 
       if (child["RDEklSXCD4C.nDUbdM2FjyP"] === "Primary caregiver") {
         child = { ...child, primaryCareGiver: "1" };
@@ -702,29 +646,37 @@ export const processInstances = async (
         child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.vBqh2aiuHOV`]: 0 };
       }
 
-      if (age < 18 && reasonForReferral && reasonForReferral === "") {
-        child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.reason`]: 1 };
+      if (serviceProvided && serviceProvided === "HCT/ Tested for HIV") {
+        child = { ...child, OVC_TST_REFER: 1 };
       } else {
-        child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.reason`]: 0 };
+        child = { ...child, OVC_TST_REFER: 0 };
       }
-      if (age < 18 && hivResult) {
-        child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.hivResult`]: 1 };
+      if (hivResult && child.OVC_TST_REFER === 1) {
+        child = { ...child, OVC_TST_REPORT: 1 };
       } else {
-        child = { ...child, [`RDEklSXCD4C.yz3zh5IFEZm.hivResult`]: 0 };
-      }
-
-      if (age < 18 && testedForHIV) {
-        child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 1 };
-      } else {
-        child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 0 };
+        child = { ...child, OVC_TST_REPORT: 0 };
       }
 
-      child = {
-        ...child,
-        riskFactor:
-          findAnyEventValue(homeVisitsBe4Quarter, "rQBaynepqjy") ||
-          child[`RDEklSXCD4C.nDUbdM2FjyP`],
-      };
+      // if (age < 18 && testedForHIV) {
+      //   child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 1 };
+      // } else {
+      //   child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 0 };
+      // }
+
+      if (child.hivStatus === "+" && age < 18) {
+        child = {
+          ...child,
+          riskFactor: "CLHIV",
+        };
+      } else {
+        child = {
+          ...child,
+          riskFactor:
+            findAnyEventValue(homeVisitsBe4Quarter, "rQBaynepqjy") ||
+            child[`RDEklSXCD4C.nDUbdM2FjyP`],
+        };
+      }
+
       child = {
         ...child,
         memberStatus:
@@ -1478,7 +1430,15 @@ export const processInstances = async (
       if (child.newlyEnrolled === "Yes" && child.hivStatus === "+") {
         child = { ...child, newlyPositive: 1 };
       } else if (child.hivStatus === "+") {
-        child = { ...child, newlyPositive: 0 };
+        if (
+          child["RDEklSXCD4C.HzUL8LTDPga"] === "Negative" &&
+          previousViralLoads.length === 0 &&
+          allValues4DataElement(previousReferrals, "XTdRWh5MqPw", "Negative")
+        ) {
+          child = { ...child, newlyPositive: 1 };
+        } else {
+          child = { ...child, newlyPositive: 0 };
+        }
       }
 
       if (
@@ -1490,6 +1450,15 @@ export const processInstances = async (
         })
       ) {
         child = { ...child, newlyTestedPositive: 1 };
+      } else if (
+        child.newlyPositive &&
+        hasDataElementWithinPeriod(
+          referralsDuringQuarter,
+          "XTdRWh5MqPw",
+          "Positive"
+        )
+      ) {
+        child = { ...child, newlyTestedPositive: 1 };
       } else if (child.hivStatus === "+") {
         child = { ...child, newlyTestedPositive: 0 };
       }
@@ -1497,10 +1466,24 @@ export const processInstances = async (
 
       child = {
         ...child,
-        newlyTestedAndOnArt: child.newlyTestedPositive,
         artStartDate: currentArtStartDate,
       };
 
+      if (
+        child.newlyTestedPositive &&
+        currentArtStartDate &&
+        isWithinInterval(parseISO(currentArtStartDate), {
+          start: quarterStart,
+          end: quarterEnd,
+        })
+      ) {
+        child = {
+          ...child,
+          newlyTestedAndOnArt: 1,
+        };
+      } else if (serviceProvidedThisQuarter === "Started HIV treatment") {
+        child = { ...child, newlyTestedAndOnArt: 1 };
+      }
       return child;
     }
   );
