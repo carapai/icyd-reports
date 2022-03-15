@@ -21,6 +21,13 @@ export const Navigation = () => {
           OVC SERVICE Layering Report
         </Tab>
         <Tab
+          icon={<IconHome24 />}
+          onClick={() => changeLink("/group-activity-data-layer")}
+          selected={active === "/group-activity-data-layer"}
+        >
+          Prevention Layering
+        </Tab>
+        <Tab
           icon={<IconList24 />}
           onClick={() => changeLink("/ovc-service-tracker")}
           selected={active === "/ovc-service-tracker"}

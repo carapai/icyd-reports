@@ -9,39 +9,40 @@ import {
   DrawerOverlay,
   List,
   ListItem,
-  Spacer,
-  Stack,
-  Text,
-  useDisclosure,
-  Box,
-  DrawerFooter,
-  Flex,
-  Heading,
   Modal,
   ModalBody,
   ModalContent,
   ModalOverlay,
-  Progress,
+  Spacer,
+  Stack,
+  Text,
+  useDisclosure,
 } from "@chakra-ui/react";
-import { saveAs } from "file-saver";
-import XLSX from "xlsx";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, TreeSelect } from "antd";
 import "antd/dist/antd.css";
 import { useStore } from "effector-react";
+import { saveAs } from "file-saver";
 import { flatten } from "lodash";
-import { ChangeEvent, useRef, useState } from "react";
+import { ChangeEvent, useRef } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
-import { columns } from "../../store/Constants";
+import XLSX from "xlsx";
 import {
   addRemoveColumn,
+  addRemoveColumn2,
   changePeriod,
   setSelectedOrgUnits,
   setUserOrgUnits,
   toggleColumns,
+  toggleColumns2,
 } from "../../store/Events";
-import { $columns, $isChecked, $store } from "../../store/Stores";
-import { processInstances } from "../../store/Queries";
+import { processPrevention } from "../../store/Queries";
+import {
+  $columns2,
+  $financialQuarter,
+  $isChecked,
+  $store,
+} from "../../store/Stores";
 
 function s2ab(s: any) {
   let buf = new ArrayBuffer(s.length);
@@ -64,7 +65,7 @@ const createQuery = (parent: any) => {
   };
 };
 
-const DataSetLayerFilter = () => {
+const PreventionLayerFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const {
     isOpen: modalIsOpen,
@@ -74,8 +75,10 @@ const DataSetLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const columns = useStore($columns);
+  const columns = useStore($columns2);
   const isChecked = useStore($isChecked);
+  const period = useStore($financialQuarter);
+
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
       const {
@@ -110,33 +113,38 @@ const DataSetLayerFilter = () => {
   };
 
   const download = async () => {
-    const trackedEntitiesQuery = {
-      results: {
-        resource: "trackedEntityInstances",
+    const query = {
+      instances: {
+        resource: "trackedEntityInstances.json",
         params: {
-          ouMode: "DESCENDANTS",
+          fields: "*",
           ou: store.selectedOrgUnits.join(";"),
-          fields: ["*"],
-          program: store.selectedProgram,
+          ouMode: "DESCENDANTS",
+          filter: `mWyp85xIzXR:IN:${[
+            "MOE Journeys Plus",
+            "MOH Journeys curriculum",
+            "No means No sessions (Boys)",
+            "No means No sessions (Girls)",
+          ].join(";")}`,
           page: 1,
-          totalPages: true,
           pageSize: 250,
+          program: "IXxHJADVCkb",
+          totalPages: true,
         },
       },
     };
 
     const {
-      results: {
+      instances: {
         trackedEntityInstances,
         pager: { pageCount },
       },
-    }: any = await engine.query(trackedEntitiesQuery);
-    const processedData = await processInstances(
+    }: any = await engine.query(query);
+    const processedData = await processPrevention(
       engine,
-      store.selectedProgram,
       trackedEntityInstances.filter((a: any) => a.inactive === false),
-      store.period,
-      store.selectedOrgUnits.join(";")
+      store.sessions,
+      period
     );
     let changedColumnData = processedData.map((d) => {
       return columns.map((c) => d[c.id] || "");
@@ -145,27 +153,33 @@ const DataSetLayerFilter = () => {
     if (pageCount > 1) {
       for (let page = 2; page <= pageCount; page++) {
         const newQuery = {
-          results: {
-            resource: "trackedEntityInstances",
+          instances: {
+            resource: "trackedEntityInstances.json",
             params: {
-              ouMode: "DESCENDANTS",
+              fields: "*",
               ou: store.selectedOrgUnits.join(";"),
-              fields: ["*"],
-              program: store.selectedProgram,
+              ouMode: "DESCENDANTS",
+              filter: `mWyp85xIzXR:IN:${[
+                "MOE Journeys Plus",
+                "MOH Journeys curriculum",
+                "No means No sessions (Boys)",
+                "No means No sessions (Girls)",
+              ].join(";")}`,
               page,
               pageSize: 250,
+              program: "IXxHJADVCkb",
+              totalPages: true,
             },
           },
         };
         const {
-          results: { trackedEntityInstances },
+          instances: { trackedEntityInstances },
         }: any = await engine.query(newQuery);
-        const processedData = await processInstances(
+        const processedData = await processPrevention(
           engine,
-          store.selectedProgram,
-          trackedEntityInstances,
-          store.period,
-          store.selectedOrgUnits.join(";")
+          trackedEntityInstances.filter((a: any) => a.inactive === false),
+          store.sessions,
+          period
         );
         let allData = processedData.map((d) => {
           return columns.map((c) => d[c.id] || "");
@@ -176,9 +190,9 @@ const DataSetLayerFilter = () => {
 
     let wb = XLSX.utils.book_new();
     wb.Props = {
-      Title: "SheetJS Tutorial",
-      Subject: "Test",
-      Author: "Red Stapler",
+      Title: "Prevention Layering",
+      Subject: "Prevention",
+      Author: "ICYD Uganda",
       CreatedDate: new Date(),
     };
 
@@ -194,7 +208,7 @@ const DataSetLayerFilter = () => {
 
     saveAs(
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
-      "export.xlsx"
+      "prevention.xlsx"
     );
     modalOnClose();
   };
@@ -279,7 +293,7 @@ const DataSetLayerFilter = () => {
               <Checkbox
                 isChecked={isChecked}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  toggleColumns(e.target.checked)
+                  toggleColumns2(e.target.checked)
                 }
               >
                 Choose Columns
@@ -288,12 +302,12 @@ const DataSetLayerFilter = () => {
 
             <DrawerBody>
               <List spacing={3}>
-                {store.columns.map((c) => (
+                {store.columns2.map((c) => (
                   <ListItem key={c.display}>
                     <Checkbox
                       isChecked={c.selected}
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        addRemoveColumn({ value: e.target.checked, id: c.id })
+                        addRemoveColumn2({ value: e.target.checked, id: c.id })
                       }
                     >
                       {c.display}
@@ -309,4 +323,4 @@ const DataSetLayerFilter = () => {
   );
 };
 
-export default DataSetLayerFilter;
+export default PreventionLayerFilter;

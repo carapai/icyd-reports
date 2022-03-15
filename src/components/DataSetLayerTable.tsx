@@ -6,7 +6,7 @@ import {
   PaginationPageGroup,
   PaginationPrevious,
   PaginationSeparator,
-  usePagination
+  usePagination,
 } from "@ajna/pagination";
 import {
   Box,
@@ -20,11 +20,12 @@ import {
   Text,
   Th,
   Thead,
-  Tr
+  Tr,
 } from "@chakra-ui/react";
 import { useStore } from "effector-react";
 import { $store } from "../store/Stores";
-import { useTracker } from "../store/Queries"
+import { useTracker } from "../store/Queries";
+import { innerColumns, otherRows } from "../store/utils";
 
 const OUTER_LIMIT = 4;
 const INNER_LIMIT = 4;
@@ -46,7 +47,7 @@ const DataSetLayerTable = () => {
       inner: INNER_LIMIT,
     },
     initialState: {
-      pageSize: 200,
+      pageSize: 20,
       currentPage: 1,
     },
   });
@@ -71,53 +72,56 @@ const DataSetLayerTable = () => {
 
   return (
     <Box>
-      <Box overflow="auto" border="3px solid gray" h="800px">
-        {isLoading && (
-          <CircularProgress isIndeterminate color="blue.700" thickness={3} />
-        )}
-        {isSuccess && data && (
-          <Table
-            variant="striped"
-            size="sm"
-            colorScheme="gray"
-            style={{ textTransform: "none" }}
+      {isLoading && (
+        <CircularProgress isIndeterminate color="blue.700" thickness={3} />
+      )}
+      {isSuccess && data && (
+        <Box m="auto" w="100%">
+          <Box
+            position="relative"
+            overflow="auto"
+            whiteSpace="nowrap"
+            h="calc(100vh - 280px)"
           >
-            <Thead>
-              <Tr py={1}>
-                {store.columns
-                  .filter((s) => s.selected)
-                  .map((column: any) => (
-                    <Th key={column.id} minW="200px">
-                      <Heading
-                        as="h6"
-                        size="xs"
-                        style={{ textTransform: "none" }}
-                      >
-                        {column.display}
-                      </Heading>
-                    </Th>
-                  ))}
-              </Tr>
-            </Thead>
-            <Tbody py={10}>
-              {data.map((record: any) => (
-                <Tr key={record.trackedEntityInstance}>
+            <Table
+              variant="striped"
+              size="sm"
+              colorScheme="gray"
+              textTransform="none"
+            >
+              <Thead>
+                <Tr py={1}>
                   {store.columns
                     .filter((s) => s.selected)
-                    .map((column) => (
-                      <Td
-                        top="0"
-                        key={`${record.trackedEntityInstance}${column.id}`}
-                      >
-                        {record[column.id]}
-                      </Td>
+                    .map((column: any, index: number) => (
+                      <Th key={column.id} {...otherRows(index, column.bg)}>
+                        <Heading as="h6" size="xs" textTransform="none">
+                          {column.display}
+                        </Heading>
+                      </Th>
                     ))}
                 </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        )}
-      </Box>
+              </Thead>
+              <Tbody py={10}>
+                {data.map((record: any) => (
+                  <Tr key={record.trackedEntityInstance}>
+                    {store.columns
+                      .filter((s) => s.selected)
+                      .map((column, index: number) => (
+                        <Td
+                          {...innerColumns(index)}
+                          key={`${record.trackedEntityInstance}${column.id}`}
+                        >
+                          {record[column.id]}
+                        </Td>
+                      ))}
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          </Box>
+        </Box>
+      )}
       <Pagination
         pagesCount={pagesCount}
         currentPage={currentPage}
@@ -195,6 +199,6 @@ const DataSetLayerTable = () => {
       {isError && <Box>{error?.message}</Box>}
     </Box>
   );
-}
+};
 
-export default DataSetLayerTable
+export default DataSetLayerTable;

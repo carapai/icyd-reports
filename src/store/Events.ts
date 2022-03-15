@@ -1,6 +1,6 @@
-import { ColumnProps } from './../interfaces';
+import { ColumnProps } from "./../interfaces";
 
-import { domain } from './Domains';
+import { domain } from "./Domains";
 
 export const changeTotal = domain.createEvent<number>();
 export const setSelectedOrgUnits = domain.createEvent<string[]>();
@@ -10,4 +10,8 @@ export const setProgram = domain.createEvent<any>();
 export const setSelectedProgram = domain.createEvent<string>();
 export const setColumn = domain.createEvent<any>();
 export const changePeriod = domain.createEvent<any>();
-export const addRemoveColumn = domain.createEvent<ColumnProps>()
+export const addRemoveColumn = domain.createEvent<ColumnProps>();
+export const addRemoveColumn2 = domain.createEvent<ColumnProps>();
+export const toggleColumns = domain.createEvent<boolean>();
+export const toggleColumns2 = domain.createEvent<boolean>();
+export const setSessions = domain.createEvent<{ [key: string]: string[] }>();

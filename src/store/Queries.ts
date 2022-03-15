@@ -7,9 +7,14 @@ import {
   parseISO,
   subYears,
 } from "date-fns";
-import { every, fromPairs, has, maxBy, sortBy, uniq } from "lodash";
+import { every, fromPairs, groupBy, has, maxBy, sortBy, uniq } from "lodash";
 import { useQuery } from "react-query";
-import { changeTotal, setSelectedOrgUnits, setUserOrgUnits } from "./Events";
+import {
+  changeTotal,
+  setSelectedOrgUnits,
+  setSessions,
+  setUserOrgUnits,
+} from "./Events";
 
 const findAgeGroup = (age: number) => {
   if (age <= 0) {
@@ -241,11 +246,40 @@ export function useLoader() {
         fields: ["id", "displayName", "toConstraint", "fromConstraint"],
       },
     },
+
+    MOE: {
+      resource: "optionGroups/HkuYbbefaEM",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    MOH: {
+      resource: "optionGroups/P4tTIlhX1yB",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    Boys: {
+      resource: "optionGroups/WuPXlmvSfVJ",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    Girls: {
+      resource: "optionGroups/okgcyLQNVFe",
+      params: {
+        fields: "options[code]",
+      },
+    },
   };
   return useQuery<any, Error>("sqlViews", async () => {
     const {
       me: { organisationUnits },
       relationships: { relationshipTypes },
+      MOE: { options },
+      MOH: { options: options1 },
+      Boys: { options: options2 },
+      Girls: { options: options3 },
     }: any = await engine.query(query);
     const processedUnits = organisationUnits.map((unit: any) => {
       return {
@@ -258,9 +292,118 @@ export function useLoader() {
     });
     setUserOrgUnits(processedUnits);
     setSelectedOrgUnits(organisationUnits.map((u: any) => u.id));
+    setSessions({
+      "MOE Journeys Plus": options.map((o: any) => o.code),
+      "MOH Journeys curriculum": options1.map((o: any) => o.code),
+      "No means No sessions (Boys)": options2.map((o: any) => o.code),
+      "No means No sessions (Girls)": options3.map((o: any) => o.code),
+    });
+    console.log(options);
     return true;
   });
 }
+
+export const processPrevention = async (
+  engine: any,
+  trackedEntityInstances: any[],
+  sessions: { [key: string]: string[] },
+  period: [Date, Date]
+) => {
+  const orgUnits = uniq(
+    trackedEntityInstances.map(({ orgUnit }: any) => orgUnit)
+  );
+
+  const {
+    hierarchy: { organisationUnits: ous },
+  }: any = await engine.query({
+    hierarchy: {
+      resource: "organisationUnits.json",
+      params: {
+        filter: `id:in:[${orgUnits.join(",")}]`,
+        fields: "id,parent[name,parent[name]]",
+        paging: "false",
+      },
+    },
+  });
+
+  const processedUnits = fromPairs(
+    ous.map((unit: any) => {
+      return [
+        unit.id,
+        {
+          subCounty: unit.parent?.name,
+          district: unit.parent?.parent?.name,
+        },
+      ];
+    })
+  );
+
+  return trackedEntityInstances.flatMap(
+    ({ attributes, enrollments, orgUnit }: any) => {
+      const units: any = processedUnits[orgUnit];
+      const [{ events, enrollmentDate, orgUnitName }] = enrollments;
+      const instance = fromPairs(
+        attributes.map((a: any) => [a.attribute, a.value])
+      );
+
+      const doneSessions = events
+        .filter((event: any) => {
+          return (
+            event.eventDate &&
+            event.programStage === "VzkQBBglj3O" &&
+            isWithinInterval(new Date(event.eventDate), {
+              start: period[0],
+              end: period[1],
+            })
+          );
+        })
+        .map(({ dataValues }: any) => {
+          const code = dataValues.find(
+            ({ dataElement }: any) => dataElement === "ypDUCAS6juy"
+          );
+          const session = dataValues.find(
+            ({ dataElement }: any) => dataElement === "n20LkH4ZBF8"
+          );
+          return { session: session?.value, code: code?.value };
+        });
+
+      const subType: any = instance?.["mWyp85xIzXR"];
+      const allSubTypes = String(subType).split(",");
+      const completed = mapping[subType];
+      const groupedSessions = groupBy(doneSessions, "code");
+      return events
+        .filter((event: any) => event.programStage === "aTZwDRoJnxj")
+        .map((event: any) => {
+          const elements = fromPairs(
+            event.dataValues.map((dv: any) => [dv.dataElement, dv.value])
+          );
+          const individualCode: any = elements.ypDUCAS6juy;
+          const participantSessions = groupedSessions[individualCode]?.filter(
+            (i: any) => {
+              return sessions[allSubTypes[0]].indexOf(i.session) !== -1;
+            }
+          );
+          const sess = fromPairs(
+            participantSessions?.map(({ session }: any) => [session, 1])
+          );
+          return {
+            event: event.event,
+            ...elements,
+            ...instance,
+            ...sess,
+            ...units,
+            parish: orgUnitName,
+            enrollmentDate,
+            [subType]: participantSessions?.length,
+            [completed]:
+              participantSessions?.length >= mapping2[subType] ? 1 : 0,
+            completedPrevention:
+              participantSessions?.length >= mapping2[subType] ? 1 : 0,
+          };
+        });
+    }
+  );
+};
 
 export const processInstances = async (
   engine: any,
@@ -500,7 +643,6 @@ export const processInstances = async (
         "HaaSLv2ur0l",
         quarterEnd
       );
-      console.log(homeVisitsBe4Quarter);
       const viralLoadsBe4Quarter = eventsBeforePeriod(
         allEvents,
         "kKlAyGUnCML",
@@ -586,6 +728,10 @@ export const processInstances = async (
         "XWudTD2LTUQ"
       );
       const serviceProvidedThisQuarter = specificDataElement(
+        referralsDuringYear,
+        "XWudTD2LTUQ"
+      );
+      const serviceProvidedThisYear = specificDataElement(
         referralThisQuarter,
         "XWudTD2LTUQ"
       );
@@ -995,7 +1141,24 @@ export const processInstances = async (
       };
       child = { ...child, [`coreEducation`]: 0 };
 
-      child = { ...child, [`HTSReferral`]: 0 };
+      if (
+        deHasAnyValue(serviceProvidedThisQuarter, [
+          "Started HIV treatment",
+          "PEP",
+          "HCT/ Tested for HIV",
+          "Intensive Adherence Counseling (IAC)",
+          "Viral Load Testing",
+          "Provided with ARVs",
+        ]) === 1 ||
+        anyEventWithAnyOfTheValue(serviceLinkagesDuringQuarter, "HzDRzHCuzdf", [
+          "HTS",
+        ])
+      ) {
+        child = { ...child, [`HTSReferral`]: 1 };
+      } else {
+        child = { ...child, [`HTSReferral`]: 0 };
+      }
+
       child = {
         ...child,
         nonDisclosureSupport:
@@ -1023,19 +1186,26 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        iac: anyEventWithDataElement(
-          viralLoadDuringQuarter,
-          "iHdNYfm1qlz",
-          "true"
-        )
-          ? 1
-          : 0,
+        iac:
+          anyEventWithDataElement(
+            viralLoadDuringQuarter,
+            "iHdNYfm1qlz",
+            "true"
+          ) ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Intensive Adherence Counseling (IAC)",
+          ])
+            ? 1
+            : 0,
       };
       child = {
         ...child,
         eMTCT:
           anyEventWithDE(homeVisitsDuringQuarter, "SrEP2vZtMHV") ||
-          anyEventWithDE(homeVisitsDuringQuarter, "ffxCn2msT1R")
+          anyEventWithDE(homeVisitsDuringQuarter, "ffxCn2msT1R") ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "EMTCT",
+          ])
             ? 1
             : 0,
       };
@@ -1109,7 +1279,13 @@ export const processInstances = async (
           anyEventWithDE(homeVisitsDuringQuarter, "eEZu3v92pJZ") ||
           anyEventWithDE(homeVisitsDuringQuarter, "C41UbAJDeqG") ||
           anyEventWithDE(homeVisitsDuringQuarter, "D7rrGXWwjGn") ||
-          anyEventWithDE(homeVisitsDuringQuarter, "CnfRJ2y4Lg8")
+          anyEventWithDE(homeVisitsDuringQuarter, "CnfRJ2y4Lg8") ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Insecticide Treated Nets",
+            "Family planning services",
+            "WASH",
+            "Immunisation",
+          ])
             ? 1
             : 0,
       };
@@ -1445,7 +1621,7 @@ export const processInstances = async (
         child.newlyPositive &&
         !!artStartDate &&
         isWithinInterval(parseISO(artStartDate), {
-          start: quarterStart,
+          start: subYears(quarterEnd, 1),
           end: quarterEnd,
         })
       ) {
@@ -1453,7 +1629,7 @@ export const processInstances = async (
       } else if (
         child.newlyPositive &&
         hasDataElementWithinPeriod(
-          referralsDuringQuarter,
+          referralsDuringYear,
           "XTdRWh5MqPw",
           "Positive"
         )
@@ -1472,8 +1648,9 @@ export const processInstances = async (
       if (
         child.newlyTestedPositive &&
         currentArtStartDate &&
+        child.onArt &&
         isWithinInterval(parseISO(currentArtStartDate), {
-          start: quarterStart,
+          start: subYears(quarterEnd, 1),
           end: quarterEnd,
         })
       ) {
@@ -1488,6 +1665,70 @@ export const processInstances = async (
     }
   );
   return instances;
+};
+
+const mapping: any = {
+  "MOE Journeys Plus": "Completed MOE Journeys Plus",
+  "MOH Journeys curriculum": "Completed MOH Journeys",
+  "No means No sessions (Boys)": "Completed NMN Boys",
+  "No means No sessions (Girls)": "Completed NMN Girls",
+};
+const mapping2: any = {
+  "MOE Journeys Plus": 18,
+  "MOH Journeys curriculum": 21,
+  "No means No sessions (Boys)": 5,
+  "No means No sessions (Girls)": 6,
+};
+
+export const useProgramStage = (
+  organisationUnits: string[],
+  period: [Date, Date],
+  sessions: { [key: string]: string[] },
+  page: number,
+  pageSize: number
+) => {
+  const engine = useDataEngine();
+  return useQuery<any, Error>(
+    ["trackedEntityInstances", ...organisationUnits, ...period, page, pageSize],
+    async () => {
+      if (organisationUnits.length > 0) {
+        const query = {
+          instances: {
+            resource: "trackedEntityInstances.json",
+            params: {
+              fields: "*",
+              ou: organisationUnits.join(";"),
+              ouMode: "DESCENDANTS",
+              filter: `mWyp85xIzXR:IN:${[
+                "MOE Journeys Plus",
+                "MOH Journeys curriculum",
+                "No means No sessions (Boys)",
+                "No means No sessions (Girls)",
+              ].join(";")}`,
+              page,
+              pageSize,
+              program: "IXxHJADVCkb",
+              totalPages: true,
+            },
+          },
+        };
+        const {
+          instances: { trackedEntityInstances, pager },
+        }: any = await engine.query(query);
+        const { total } = pager;
+        changeTotal(total);
+
+        return await processPrevention(
+          engine,
+          trackedEntityInstances,
+          sessions,
+          period
+        );
+      }
+      changeTotal(0);
+      return [];
+    }
+  );
 };
 export const useTracker = (
   program: string,
@@ -1531,7 +1772,9 @@ export const useTracker = (
         return await processInstances(
           engine,
           program,
-          trackedEntityInstances,
+          trackedEntityInstances.filter(
+            (instance: any) => instance.inactive === false
+          ),
           period,
           organisationUnits.join(";")
         );

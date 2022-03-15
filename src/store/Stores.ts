@@ -1,4 +1,4 @@
-import { columns } from "./Constants";
+import { columns, columns2 } from "./Constants";
 import { Store } from "../interfaces";
 import { domain } from "./Domains";
 import {
@@ -9,8 +9,14 @@ import {
   changeTotal,
   changePeriod,
   addRemoveColumn,
+  toggleColumns,
+  setSessions,
+  addRemoveColumn2,
+  toggleColumns2,
 } from "./Events";
 import moment from "moment";
+import { every } from "lodash";
+import { calculateQuarter } from "./utils";
 
 export const $store = domain
   .createStore<Store>({
@@ -23,6 +29,8 @@ export const $store = domain
     total: 0,
     period: moment(),
     columns: columns,
+    columns2: columns2,
+    sessions: {},
   })
   .on(setUserOrgUnits, (state, userOrgUnits) => {
     return { ...state, userOrgUnits };
@@ -50,8 +58,48 @@ export const $store = domain
       return column;
     });
     return { ...state, columns: processed };
+  })
+  .on(addRemoveColumn2, (state, { id, value }) => {
+    const processed = state.columns2.map((column) => {
+      if (id === column.id) {
+        return { ...column, selected: value };
+      }
+      return column;
+    });
+    return { ...state, columns2: processed };
+  })
+  .on(toggleColumns, (state, value) => {
+    const processed = state.columns.map((column) => {
+      return { ...column, selected: value };
+    });
+    return { ...state, columns: processed };
+  })
+  .on(toggleColumns2, (state, value) => {
+    const processed = state.columns2.map((column) => {
+      return { ...column, selected: value };
+    });
+    return { ...state, columns2: processed };
+  })
+  .on(setSessions, (state, sessions) => {
+    return { ...state, sessions };
   });
 
 export const $columns = $store.map((state) => {
   return state.columns.filter((c) => c.selected);
+});
+export const $columns2 = $store.map((state) => {
+  return state.columns2.filter((c) => c.selected);
+});
+
+export const $isChecked = $store.map((state) => {
+  return every(state.columns.map((c) => c.selected));
+});
+
+export const $financialQuarter = $store.map((state) => {
+  const computation = calculateQuarter(
+    state.period.year(),
+    state.period.quarter()
+  );
+  console.log(computation)
+  return computation;
 });
