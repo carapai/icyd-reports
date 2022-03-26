@@ -55,6 +55,7 @@ const DataSetLayerTable = () => {
   const { isLoading, isSuccess, isError, error, data } = useTracker(
     store.selectedProgram,
     store.selectedOrgUnits,
+    store.sessions,
     store.period,
     currentPage,
     pageSize

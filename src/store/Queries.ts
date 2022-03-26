@@ -43,6 +43,64 @@ const findAgeGroup = (age: number) => {
     return "25+";
   }
 };
+const mapping: any = {
+  "MOE Journeys Plus": "Completed MOE Journeys Plus",
+  "MOH Journeys curriculum": "Completed MOH Journeys",
+  "No means No sessions (Boys)": "Completed NMN Boys",
+  "No means No sessions (Girls)": "Completed NMN Girls",
+};
+const mapping2: any = {
+  "MOE Journeys Plus": 18,
+  "MOH Journeys curriculum": 21,
+  "No means No sessions (Boys)": 4,
+  "No means No sessions (Girls)": 5,
+  SINOVUYO: 10,
+};
+
+const hadASession = (
+  allSessions: string[][],
+  participantIndex: number,
+  sessionNameIndex: number,
+  sessionDateIndex: number,
+  participant: string,
+  startDate: Date,
+  endDate: Date,
+  sessions: string[]
+) => {
+  return !!allSessions.find((row: string[]) => {
+    return (
+      row[participantIndex] === participant &&
+      sessions.indexOf(row[sessionNameIndex]) !== -1 &&
+      isWithinInterval(parseISO(row[sessionDateIndex]), {
+        start: startDate,
+        end: endDate,
+      })
+    );
+  });
+};
+
+const hasCompleted = (
+  allSessions: string[][],
+  participantIndex: number,
+  sessionNameIndex: number,
+  sessionDateIndex: number,
+  participant: string,
+  endDate: Date,
+  sessions: string[],
+  value: number
+) => {
+  const doneSessions = allSessions
+    .filter((row: string[]) => {
+      return (
+        row[participantIndex] === participant &&
+        sessions.indexOf(row[sessionNameIndex]) !== -1 &&
+        parseISO(row[sessionDateIndex]).getTime() <= endDate.getTime()
+      );
+    })
+    .map((row: string[]) => row[sessionNameIndex]);
+
+  return doneSessions.length >= value;
+};
 
 const isAtSchool = (
   age: number,
@@ -91,6 +149,7 @@ const eventsWithinPeriod = (
 ) => {
   return events.filter((e: any) => {
     return (
+      e.eventDate &&
       e.programStage === programStage &&
       isWithinInterval(parseISO(e.eventDate), { start, end })
     );
@@ -199,20 +258,27 @@ const checkRiskAssessment = (
       .filter((v) => v !== undefined);
     if (de.length === 0) {
       return 0;
-    } else if (de.length < dataElements.length) {
-      if (de.indexOf("true") === -1) {
-        return 0;
+    }
+    if (de.length < dataElements.length) {
+      if (every(de, (v) => v === value)) {
+        return 3;
+      }
+      if (de.indexOf(value) === -1) {
+        return 2;
       }
       return 1;
-    } else if (
-      de.length === dataElements.length &&
-      every(de, (v) => v === value)
-    ) {
-      return 2;
     }
-    return 3;
+    if (de.length === dataElements.length) {
+      if (every(de, (v) => v === value)) {
+        return 6;
+      }
+      if (de.indexOf(value) === -1) {
+        return 5;
+      }
+      return 4;
+    }
   }
-  return false;
+  return -1;
 };
 
 const hasDataElementWithinPeriod = (
@@ -271,6 +337,54 @@ export function useLoader() {
         fields: "options[code]",
       },
     },
+    VSLA: {
+      resource: "optionGroups/XQ3eQax0uIk",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    VSLATOT: {
+      resource: "optionGroups/qEium1Lrsc0",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    Financial: {
+      resource: "optionGroups/LUR9gZUkcrr",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    SPM: {
+      resource: "optionGroups/EYMKGdEeniO",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    BANK: {
+      resource: "optionGroups/gmEcQwHbivM",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    SINOVUYO: {
+      resource: "optionGroups/ptI9Geufl7R",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    ECD: {
+      resource: "optionGroups/QHaULS891IF",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    SAVING: {
+      resource: "optionGroups/ZOAmd05j2t9",
+      params: {
+        fields: "options[code]",
+      },
+    },
   };
   return useQuery<any, Error>("sqlViews", async () => {
     const {
@@ -280,6 +394,14 @@ export function useLoader() {
       MOH: { options: options1 },
       Boys: { options: options2 },
       Girls: { options: options3 },
+      VSLA: { options: options4 },
+      VSLATOT: { options: options5 },
+      Financial: { options: options6 },
+      SPM: { options: options7 },
+      BANK: { options: options8 },
+      SINOVUYO: { options: options9 },
+      ECD: { options: options10 },
+      SAVING: { options: options11 },
     }: any = await engine.query(query);
     const processedUnits = organisationUnits.map((unit: any) => {
       return {
@@ -297,8 +419,15 @@ export function useLoader() {
       "MOH Journeys curriculum": options1.map((o: any) => o.code),
       "No means No sessions (Boys)": options2.map((o: any) => o.code),
       "No means No sessions (Girls)": options3.map((o: any) => o.code),
+      "VSLA Methodology": options4.map((o: any) => o.code),
+      "VSLA TOT": options5.map((o: any) => o.code),
+      "Financial Literacy": options6.map((o: any) => o.code),
+      "SPM Training": options7.map((o: any) => o.code),
+      "Bank Linkages": options8.map((o: any) => o.code),
+      SINOVUYO: options9.map((o: any) => o.code),
+      ECD: options10.map((o: any) => o.code),
+      "Saving and Borrowing": options11.map((o: any) => o.code),
     });
-    console.log(options);
     return true;
   });
 }
@@ -410,7 +539,8 @@ export const processInstances = async (
   program: string,
   trackedEntityInstances: any[],
   period: any,
-  ou: string
+  ou: string,
+  sessions: { [key: string]: string[] }
 ) => {
   const quarterStart = period.startOf("quarter").toDate();
   const quarterEnd = period.endOf("quarter").toDate();
@@ -450,6 +580,43 @@ export const processInstances = async (
     },
   });
 
+  const householdMemberCodes = trackedEntityInstances.flatMap(
+    ({ attributes }: any) => {
+      const attribute = attributes.find(
+        (a: any) => a.attribute === "HLKc2AKR9jW"
+      );
+      if (attribute) {
+        return [attribute.value];
+      }
+      return [];
+    }
+  );
+
+  const {
+    sessions: { headers, rows },
+  } = await engine.query({
+    sessions: {
+      resource: "events/query.json",
+      params: {
+        ou,
+        ouMode: "DESCENDANTS",
+        programStage: "VzkQBBglj3O",
+        skipPaging: "true",
+        filter: `ypDUCAS6juy:IN:${householdMemberCodes.join(";")}`,
+      },
+    },
+  });
+
+  const sessionNameIndex = headers.findIndex(
+    (header: any) => header.name === "n20LkH4ZBF8"
+  );
+  const participantIndex = headers.findIndex(
+    (header: any) => header.name === "ypDUCAS6juy"
+  );
+  const sessionDateIndex = headers.findIndex(
+    (header: any) => header.name === "eventDate"
+  );
+
   const processedUnits = fromPairs(
     organisationUnits.map((unit: any) => {
       return [
@@ -466,39 +633,42 @@ export const processInstances = async (
       attributes,
       trackedEntityInstance,
       relationships: [relationship],
-      enrollments: [
-        {
-          trackedEntityInstance: eventInstance,
-          events,
-          orgUnitName,
-          enrollmentDate,
-        },
-      ],
+      enrollments,
     }) => {
       const units: any = processedUnits[orgUnit];
-      const allEvents = events
-        .filter(({ deleted }: any) => deleted === false)
-        .map(({ dataValues, event, eventDate, programStage }: any) => {
-          return {
-            event,
-            eventDate,
-            trackedEntityInstance: eventInstance,
-            programStage,
-            ...fromPairs(
-              dataValues.map(({ dataElement, value }: any) => [
-                dataElement,
-                value,
-              ])
-            ),
-          };
-        });
+      const [{ trackedEntityInstance: eventInstance, orgUnitName }] =
+        enrollments;
+
+      const [enrollmentDate] = enrollments
+        .map((e: any) => e.enrollmentDate)
+        .sort();
+
+      const allEvents = enrollments.flatMap(({ events }: any) => {
+        return events
+          .filter(({ deleted }: any) => deleted === false)
+          .map(({ dataValues, event, eventDate, programStage }: any) => {
+            return {
+              event,
+              eventDate,
+              trackedEntityInstance: eventInstance,
+              programStage,
+              ...fromPairs(
+                dataValues.map(({ dataElement, value }: any) => [
+                  dataElement,
+                  value,
+                ])
+              ),
+            };
+          });
+      });
+
       const parent = indexCases.find(
         ({ trackedEntityInstance }: any) =>
           relationship?.from?.trackedEntityInstance.trackedEntityInstance ===
           trackedEntityInstance
       );
 
-      let child = fromPairs(
+      let child: any = fromPairs(
         attributes.map(({ attribute, value }: any) => [
           `${program}.${attribute}`,
           value,
@@ -563,11 +733,10 @@ export const processInstances = async (
         };
       }
 
-      const isWithin = isWithinInterval(
-        parseISO(child["HEWq6yr4cs5.enrollmentDate"] as string),
-        { start: quarterStart, end: quarterEnd }
-      );
-
+      const isWithin = isWithinInterval(parseISO(enrollmentDate), {
+        start: quarterStart,
+        end: quarterEnd,
+      });
       // One Year before quarter end
 
       const riskAssessmentsDuringYear = eventsWithinPeriod(
@@ -709,6 +878,18 @@ export const processInstances = async (
         ],
         "false"
       );
+
+      const atTBRiskChild = checkRiskAssessment(
+        currentRiskAssessment,
+        ["DgCXKSDPTWn", "Rs5qrKay7Gq", "QEm2B8LZtzd", "X9n17I5Ibdf"],
+        "true"
+      );
+      const atTBRiskAdult = checkRiskAssessment(
+        currentRiskAssessment,
+        ["If8hDeux5XE", "ha2nnIeFgbu", "NMtrXN3NBqY"],
+        "true"
+      );
+
       const isNotAtRisk = checkRiskAssessment(
         currentRiskAssessment,
         [
@@ -1057,19 +1238,70 @@ export const processInstances = async (
           VLStatus: "",
         };
       }
-      child = { ...child, [`VSLA`]: 0 };
-      child = { ...child, [`fLiteracy`]: 0 };
       child = {
         ...child,
-        [`bankLinkages`]: anyEventWithAnyOfTheValue(
-          serviceLinkagesDuringQuarter,
-          "NxQ4EZUB0fr",
+        VSLA: hadASession(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
+          quarterEnd,
           [
-            "F1. Access credit services",
-            "F2. Access saving services",
-            "F3. Insurance services/ Health Fund",
+            ...sessions["VSLA Methodology"],
+            ...sessions["VSLA TOT"],
+            ...sessions["Saving and Borrowing"],
           ]
-        ),
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        fLiteracy:
+          hadASession(
+            rows,
+            participantIndex,
+            sessionNameIndex,
+            sessionDateIndex,
+            child["RDEklSXCD4C.HLKc2AKR9jW"],
+            quarterStart,
+            quarterEnd,
+            sessions["Financial Literacy"]
+          ) ||
+          (anyEventWithDE(homeVisitsDuringQuarter, "PBiFAeCVnot") &&
+            age >= 10) ||
+          ((anyEventWithDE(homeVisitsDuringQuarter, "Xlw16qiDxqk") ||
+            anyEventWithDE(homeVisitsDuringQuarter, "rOTbGzSfKbs")) &&
+            age >= 15)
+            ? 1
+            : 0,
+      };
+      child = {
+        ...child,
+        [`bankLinkages`]:
+          anyEventWithAnyOfTheValue(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            [
+              "F1. Access credit services",
+              "F2. Access saving services",
+              "F3. Insurance services/ Health Fund",
+            ]
+          ) ||
+          hadASession(
+            rows,
+            participantIndex,
+            sessionNameIndex,
+            sessionDateIndex,
+            child["RDEklSXCD4C.HLKc2AKR9jW"],
+            quarterStart,
+            quarterEnd,
+            sessions["Bank Linkages"]
+          )
+            ? 1
+            : 0,
       };
       child = {
         ...child,
@@ -1081,66 +1313,140 @@ export const processInstances = async (
             "A2. input such as seeds and poultry",
             "A3. training in agricultural production",
           ]
-        ),
+        )
+          ? 1
+          : 0,
       };
-      child = { ...child, [`spmTraining`]: 0 };
       child = {
         ...child,
-        [`micro`]: anyEventWithAnyOfTheValue(
+        spmTraining: hadASession(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
+          quarterEnd,
+          sessions["SPM Training"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        micro: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
           "NxQ4EZUB0fr",
           ["B1. Access to credit services", "B2. Access to saving services"]
-        ),
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`igaBooster`]: anyEventWithAnyOfTheValue(
+        igaBooster: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
           "NxQ4EZUB0fr",
           ["O3. IGA Booster"]
-        ),
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`tempConsumption`]: anyEventWithAnyOfTheValue(
-          serviceLinkagesDuringQuarter,
-          "NxQ4EZUB0fr",
-          [
-            "UF1.Gov't Emergence fund",
-            "UF3 VSLA OVC protection Fund",
-            "UF2. SAGE",
-            "UF7. Others specify",
-          ]
-        ),
+        tempConsumption:
+          anyEventWithAnyOfTheValue(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            ["UF12 Temporary Food Support"]
+          ) ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Temporary Food Support",
+          ])
+            ? 1
+            : 0,
       };
       child = {
         ...child,
-        [`vlsaOvcFund`]: anyEventWithAnyOfTheValue(
+        vlsaOvcFund: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
           "NxQ4EZUB0fr",
           ["UF3 VSLA OVC protection Fund"]
-        ),
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        educationFund: anyEventWithAnyOfTheValue(
+          serviceLinkagesDuringQuarter,
+          "NxQ4EZUB0fr",
+          ["UF09 OVC VSLA Education Fund"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        heathFund: anyEventWithAnyOfTheValue(
+          serviceLinkagesDuringQuarter,
+          "NxQ4EZUB0fr",
+          ["UF10 OVC VSLA Health Fund"]
+        )
+          ? 1
+          : 0,
       };
 
       child = {
         ...child,
-        [`educationSubsidy`]: anyEventWithAnyOfTheValue(
-          serviceLinkagesDuringQuarter,
-          "NxQ4EZUB0fr",
-          ["O1. Education subsidy"]
-        ),
+        educationSubsidy:
+          anyEventWithAnyOfTheValue(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            ["O1. Education subsidy"]
+          ) ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Educational support",
+          ])
+            ? 1
+            : 0,
       };
-      child = { ...child, [`homeLearning`]: 0 };
       child = {
         ...child,
-        [`nonFormalEducation`]: anyEventWithAnyOfTheValue(
+        homeLearning: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
           "NxQ4EZUB0fr",
-          ["O2. None Formal Education"]
-        ),
+          ["Home Learning"]
+        )
+          ? 1
+          : 0,
       };
-      child = { ...child, [`coreEducation`]: 0 };
+      child = {
+        ...child,
+        nonFormalEducation:
+          anyEventWithAnyOfTheValue(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            ["O2. None Formal Education"]
+          ) ||
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Vocational/Apprenticeship",
+          ])
+            ? 1
+            : 0,
+      };
 
+      child = {
+        ...child,
+        educationInformation:
+          (anyEventWithDE(homeVisitsDuringQuarter, "sTyaaJxvR5S") ||
+            anyEventWithDE(homeVisitsDuringQuarter, "oyQActIi370") ||
+            anyEventWithDE(homeVisitsDuringQuarter, "P7nd91Mkhol") ||
+            anyEventWithDE(homeVisitsDuringQuarter, "leNiACgoBcL")) &&
+          age >= 6
+            ? 1
+            : 0,
+      };
       if (
         deHasAnyValue(serviceProvidedThisQuarter, [
           "Started HIV treatment",
@@ -1154,9 +1460,9 @@ export const processInstances = async (
           "HTS",
         ])
       ) {
-        child = { ...child, [`HTSReferral`]: 1 };
+        child = { ...child, HTSReferral: 1 };
       } else {
-        child = { ...child, [`HTSReferral`]: 0 };
+        child = { ...child, HTSReferral: 0 };
       }
 
       child = {
@@ -1169,15 +1475,23 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`artInitiation`]: anyEventWithAnyOfTheValue(
+        artInitiation: anyEventWithAnyOfTheValue(
           referralsDuringQuarter,
           "XWudTD2LTUQ",
           ["Initiated on HIV Treatment"]
-        ),
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`artAdherenceEducation`]:
+        homeDrugDelivery: deHasAnyValue(serviceProvidedThisQuarter, [
+          "Home drug delivery",
+        ]),
+      };
+      child = {
+        ...child,
+        artAdherenceEducation:
           anyEventWithDE(homeVisitsDuringQuarter, "NxhBKqINsZY") ||
           anyEventWithDE(homeVisitsDuringQuarter, "svrj6VtHjay") ||
           anyEventWithDE(homeVisitsDuringQuarter, "NJZ13SXf8XV")
@@ -1211,87 +1525,216 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`hivPrevention`]: anyEventWithDE(
-          homeVisitsDuringQuarter,
-          "xXqKqvuwA8m"
+        hivPrevention: anyEventWithDE(homeVisitsDuringQuarter, "xXqKqvuwA8m")
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        journeysMOH: hasCompleted(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterEnd,
+          sessions["MOH Journeys curriculum"],
+          mapping2["MOH Journeys curriculum"]
         )
           ? 1
           : 0,
       };
       child = {
         ...child,
-        [`journeysMOH`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        journeysLARA: hasCompleted(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterEnd,
+          sessions["MOE Journeys Plus"],
+          mapping2["MOE Journeys Plus"]
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`journeysLARA`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        NMNBoys: hasCompleted(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterEnd,
+          sessions["No means No sessions (Boys)"],
+          mapping2["No means No sessions (Boys)"]
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`NMNBoys`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        NMNGirls: hasCompleted(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterEnd,
+          sessions["No means No sessions (Girls)"],
+          mapping2["No means No sessions (Girls)"]
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`NMNGirls`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
-      };
-      child = {
-        ...child,
-        [`TFHealth`]: anyEventWithAnyOfTheValue(
+        TFHealth: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
-          "HzDRzHCuzdf",
-          ["Unconditional financial support initiatives"]
+          "NxQ4EZUB0fr",
+          ["Transport to Facility"]
         )
           ? 1
           : 0,
       };
       child = {
         ...child,
-        [`PEP`]: anyEventWithAnyOfTheValue(
+        PEP: anyEventWithAnyOfTheValue(
           serviceProvisionDuringQuarter,
-          "rzd1tAkPSkv",
+          "XWudTD2LTUQ",
           ["PEP"]
-        ),
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`covid19Education`]: "",
+        covid19Education: anyEventWithDE(homeVisitsDuringQuarter, "RtQudbqa6XH")
+          ? 1
+          : 0,
       };
 
       child = {
         ...child,
-        [`otherHealthServices`]:
+        immunization: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Immunisation"]
+        )
+          ? 1
+          : 0,
+      };
+
+      child = {
+        ...child,
+        wash:
           anyEventWithDE(homeVisitsDuringQuarter, "eEZu3v92pJZ") ||
-          anyEventWithDE(homeVisitsDuringQuarter, "C41UbAJDeqG") ||
-          anyEventWithDE(homeVisitsDuringQuarter, "D7rrGXWwjGn") ||
-          anyEventWithDE(homeVisitsDuringQuarter, "CnfRJ2y4Lg8") ||
           anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
-            "Insecticide Treated Nets",
-            "Family planning services",
             "WASH",
-            "Immunisation",
           ])
             ? 1
             : 0,
       };
       child = {
         ...child,
-        [`GBVPreventionEducation`]:
+        treatedNets: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Insecticide Treated Nets"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        familyPlanning: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Family planning services"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        tested4TB: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Tested for TB"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        initiatedOnTB: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Initiated on TB Treatment"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        supported2CompleteTBDose: anyEventWithAnyOfTheValue(
+          referralsDuringQuarter,
+          "XWudTD2LTUQ",
+          ["Supported to Complete TB Dose"]
+        )
+          ? 1
+          : 0,
+      };
+      child = {
+        ...child,
+        viralLoadBleeding:
+          anyEventWithAnyOfTheValue(referralsDuringQuarter, "XWudTD2LTUQ", [
+            "Viral Load Testing",
+          ]) ||
+          anyEventWithAnyOfTheValue(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            ["HTS7. Viral load test"]
+          )
+            ? 1
+            : 0,
+      };
+      child = {
+        ...child,
+        returnedToCare: anyEventWithAnyOfTheValue(
+          serviceLinkagesDuringQuarter,
+          "NxQ4EZUB0fr",
+          ["PLHIV Returned to care"]
+        )
+          ? 1
+          : 0,
+      };
+
+      child = {
+        ...child,
+        otherHealthServices:
+          anyEventWithDE(homeVisitsDuringQuarter, "eEZu3v92pJZ") ||
+          // anyEventWithDE(homeVisitsDuringQuarter, "C41UbAJDeqG") ||
+          anyEventWithDE(homeVisitsDuringQuarter, "D7rrGXWwjGn") ||
+          anyEventWithDE(homeVisitsDuringQuarter, "CnfRJ2y4Lg8")
+            ? 1
+            : 0,
+      };
+      child = {
+        ...child,
+        tbScreening: atTBRiskChild >= 4 || atTBRiskAdult >= 4 ? 1 : 0,
+      };
+
+      child = {
+        ...child,
+        atRiskOfTB: atTBRiskChild >= 5 || atTBRiskAdult >= 5 ? 1 : 0,
+      };
+
+      child = {
+        ...child,
+        GBVPreventionEducation:
           anyEventWithDE(homeVisitsDuringQuarter, "ENMOyjoE2GM") ||
           anyEventWithDE(homeVisitsDuringQuarter, "ak7SceZTDsF") ||
           anyEventWithDE(homeVisitsDuringQuarter, "HqbcvvZAc9w") ||
@@ -1304,39 +1747,63 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`TFGBV`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        TFGBV:
+          anyEventWithDataElement(
+            referralsDuringQuarter,
+            "XWudTD2LTUQ",
+            "Transport GBV"
+          ) ||
+          anyEventWithDataElement(
+            serviceLinkagesDuringQuarter,
+            "NxQ4EZUB0fr",
+            "Transport GBV"
+          )
+            ? 1
+            : 0,
       };
       child = {
         ...child,
-        [`referral4LegalSupport`]: anyEventWithDataElement(
+        referral4LegalSupport: anyEventWithDataElement(
           referralsDuringQuarter,
           "EDa2GQUCbsx",
           "Legal Support"
-        ),
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`ECD`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        ECD: hadASession(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
+          quarterEnd,
+          sessions["ECD"]
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`parenting`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        parenting: hasCompleted(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterEnd,
+          sessions["SINOVUYO"],
+          mapping2["SINOVUYO"]
+        )
+          ? 1
+          : 0,
       };
       child = {
         ...child,
-        [`childProtectionEducation`]:
+        childProtectionEducation:
           anyEventWithDE(homeVisitsDuringQuarter, "cgnfO3xqaYb") ||
           anyEventWithDE(homeVisitsDuringQuarter, "bJPqgTbbt8g") ||
           anyEventWithDE(homeVisitsDuringQuarter, "UlQEavBni01") ||
@@ -1347,7 +1814,7 @@ export const processInstances = async (
 
       child = {
         ...child,
-        [`nutritionEducation`]:
+        nutritionEducation:
           anyEventWithDE(homeVisitsDuringQuarter, "FGs1bkmfoTX") ||
           anyEventWithDE(homeVisitsDuringQuarter, "BDVZPgVPVww") ||
           anyEventWithDE(homeVisitsDuringQuarter, "p9EaFSIg3ht") ||
@@ -1357,18 +1824,22 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        [`nutritionalAssessment`]: anyEventWithAnyOfTheValue(
-          homeVisitsDuringQuarter,
-          "YclIJQQsA89",
-          ["Yes"]
-        ),
+        nutritionalFoodSupplement: deHasAnyValue(serviceProvidedThisQuarter, [
+          "Food supplement",
+        ]),
       };
       child = {
         ...child,
-        [`voucher4CropsOrKitchenGardens`]: anyEventWithAnyOfTheValue(
+        nutritionalAssessment: deHasAnyValue(serviceProvidedThisQuarter, [
+          "Nutritional assessment",
+        ]),
+      };
+      child = {
+        ...child,
+        voucher4CropsOrKitchenGardens: anyEventWithAnyOfTheValue(
           serviceLinkagesDuringQuarter,
-          "HzDRzHCuzdf",
-          ["Agribusiness"]
+          "NxQ4EZUB0fr",
+          ["A1. Input Markets through voucher", "M3 Input Vouchers"]
         )
           ? 1
           : 0,
@@ -1376,7 +1847,18 @@ export const processInstances = async (
 
       child = {
         ...child,
-        [`psychosocialSupport`]:
+        kitchenGarden: anyEventWithAnyOfTheValue(
+          serviceLinkagesDuringQuarter,
+          "NxQ4EZUB0fr",
+          ["A2. input such as seeds and poultry"]
+        )
+          ? 1
+          : 0,
+      };
+
+      child = {
+        ...child,
+        psychosocialSupport:
           anyEventWithDE(homeVisitsDuringQuarter, "EPchB4Exe2W") ||
           anyEventWithDE(homeVisitsDuringQuarter, "bl1spy2qZx9") ||
           anyEventWithDE(homeVisitsDuringQuarter, "VfpDpPPKRN6") ||
@@ -1430,12 +1912,12 @@ export const processInstances = async (
         child.igaBooster === 1 ||
         child.tempConsumption ||
         child.vlsaOvcFund;
-
       const coreEducation =
         child.educationSubsidy === 1 ||
         child.homeLearning === 1 ||
-        child.nonFormalEducation === 1;
-
+        child.nonFormalEducation === 1 ||
+        child.educationInformation === 1 ||
+        child.educationFund === 1;
       const coreHealth =
         child.HTSReferral === 1 ||
         child.nonDisclosureSupport === 1 ||
@@ -1444,17 +1926,27 @@ export const processInstances = async (
         child.iac === 1 ||
         child.eMTCT === 1 ||
         child.hivPrevention === 1 ||
-        child.journeysMOH ||
-        child.journeysLARA ||
-        child.NMNBoys ||
-        child.NMNGirls ||
+        child.journeysMOH === 1 ||
+        child.journeysLARA === 1 ||
+        child.NMNBoys === 1 ||
+        child.NMNGirls === 1 ||
+        child.TFHealth === 1 ||
+        child.PEP === 1 ||
+        child.covid19Education === 1 ||
+        child.otherHealthServices === 1 ||
+        child.homeDrugDelivery === 1 ||
+        child.tested4TB ||
+        child.initiatedOnTB ||
+        child.wash ||
+        child.treatedNets ||
+        child.familyPlanning ||
+        child.healthFund ||
         child.TFHealth ||
-        child.PEP ||
-        child.covid19Education ||
-        child.otherHealthServices;
+        child.supported2CompleteTBDose ||
+        child.immunization;
 
       const coreChildProtection =
-        child.VSLGBVPreventionEducationA === 1 ||
+        child.GBVPreventionEducation === 1 ||
         child.TFGBV === 1 ||
         child.referral4LegalSupport === 1 ||
         child.ECD === 1 ||
@@ -1464,7 +1956,9 @@ export const processInstances = async (
       const coreNutrition =
         child.nutritionEducation === 1 ||
         child.voucher4CropsOrKitchenGardens === 1 ||
-        child.nutritionalAssessment === 1;
+        child.nutritionalAssessment === 1 ||
+        child.kitchenGarden === 1 ||
+        child.nutritionalFoodSupplement === 1;
       const corePSS = child.psychosocialSupport === 1;
 
       child = {
@@ -1535,7 +2029,9 @@ export const processInstances = async (
       if (
         child.hivStatus === "+" ||
         child.hivStatus === "-" ||
-        (isNotAtRisk && isNotAtRiskAdult && child.hivStatus === "DK")
+        ([0, 3, 6].indexOf(isNotAtRisk) !== -1 &&
+          [0, 3, 6].indexOf(isNotAtRiskAdult) !== -1 &&
+          child.hivStatus === "DK")
       ) {
         child = {
           ...child,
@@ -1557,25 +2053,23 @@ export const processInstances = async (
         child = { ...child, isAtRisk: 0 };
       }
       if (child.riskAssessment === 1) {
-        if (age < 18 && (isNotAtRisk === 0 || isNotAtRisk === 2)) {
+        if (age < 18 && [0, 3, 6].indexOf(isNotAtRisk) !== -1) {
+          child = { ...child, isAtRisk: 0 };
+        } else if (age >= 18 && [0, 3, 6].indexOf(isNotAtRiskAdult) !== -1) {
           child = { ...child, isAtRisk: 0 };
         } else if (
-          age >= 18 &&
-          (isNotAtRiskAdult === 0 || isNotAtRiskAdult === 2)
-        ) {
-          child = { ...child, isAtRisk: 0 };
-        } else if (
-          isNotAtRisk === 1 ||
-          isNotAtRiskAdult === 1 ||
-          isNotAtRiskAdult === 3 ||
-          isNotAtRisk === 3
+          [0, 3, 6].indexOf(isNotAtRiskAdult) === -1 ||
+          [0, 3, 6].indexOf(isNotAtRisk) === -1
         ) {
           child = { ...child, isAtRisk: 1 };
         }
       }
 
       if (child.hivStatus !== "+") {
-        if (isNotAtRisk === 2 || isNotAtRiskAdult === 2) {
+        if (
+          [0, 3, 6].indexOf(isNotAtRiskAdult) !== -1 ||
+          [0, 3, 6].indexOf(isNotAtRisk) !== -1
+        ) {
           child = { ...child, isNotAtRisk: 1 };
         } else {
           child = { ...child, isNotAtRisk: 0 };
@@ -1667,19 +2161,6 @@ export const processInstances = async (
   return instances;
 };
 
-const mapping: any = {
-  "MOE Journeys Plus": "Completed MOE Journeys Plus",
-  "MOH Journeys curriculum": "Completed MOH Journeys",
-  "No means No sessions (Boys)": "Completed NMN Boys",
-  "No means No sessions (Girls)": "Completed NMN Girls",
-};
-const mapping2: any = {
-  "MOE Journeys Plus": 18,
-  "MOH Journeys curriculum": 21,
-  "No means No sessions (Boys)": 5,
-  "No means No sessions (Girls)": 6,
-};
-
 export const useProgramStage = (
   organisationUnits: string[],
   period: [Date, Date],
@@ -1717,7 +2198,6 @@ export const useProgramStage = (
         }: any = await engine.query(query);
         const { total } = pager;
         changeTotal(total);
-
         return await processPrevention(
           engine,
           trackedEntityInstances,
@@ -1733,6 +2213,7 @@ export const useProgramStage = (
 export const useTracker = (
   program: string,
   organisationUnits: string[],
+  sessions: { [a: string]: string[] },
   period: any,
   page: number,
   pageSize: number
@@ -1773,10 +2254,12 @@ export const useTracker = (
           engine,
           program,
           trackedEntityInstances.filter(
-            (instance: any) => instance.inactive === false
+            (instance: any) =>
+              instance.inactive === false && instance.deleted === false
           ),
           period,
-          organisationUnits.join(";")
+          organisationUnits.join(";"),
+          sessions
         );
       }
       changeTotal(0);

@@ -100,6 +100,5 @@ export const $financialQuarter = $store.map((state) => {
     state.period.year(),
     state.period.quarter()
   );
-  console.log(computation)
   return computation;
 });

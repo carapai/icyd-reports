@@ -136,7 +136,8 @@ const DataSetLayerFilter = () => {
       store.selectedProgram,
       trackedEntityInstances.filter((a: any) => a.inactive === false),
       store.period,
-      store.selectedOrgUnits.join(";")
+      store.selectedOrgUnits.join(";"),
+      store.sessions
     );
     let changedColumnData = processedData.map((d) => {
       return columns.map((c) => d[c.id] || "");
@@ -165,7 +166,8 @@ const DataSetLayerFilter = () => {
           store.selectedProgram,
           trackedEntityInstances,
           store.period,
-          store.selectedOrgUnits.join(";")
+          store.selectedOrgUnits.join(";"),
+          store.sessions
         );
         let allData = processedData.map((d) => {
           return columns.map((c) => d[c.id] || "");
