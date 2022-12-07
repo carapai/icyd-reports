@@ -533,7 +533,7 @@ const OVCServiceTrackerTable = ({ districts, period }: Filters) => {
 
               <Table ref={ref} id="ovc-tracker-table">
                 <Thead bg="#002060">
-                  <Tr>
+                  <Tr h="48px">
                     <Th
                       color="white"
                       border="1px solid #0270C0"
@@ -644,7 +644,7 @@ const OVCServiceTrackerTable = ({ districts, period }: Filters) => {
                       CLHIV served with trackers
                     </Th>
                   </Tr>
-                  <Tr>
+                  <Tr h="50px" maxH="50px">
                     <Th
                       color="white"
                       textAlign="center"

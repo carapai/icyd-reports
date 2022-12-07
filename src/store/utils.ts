@@ -96,17 +96,17 @@ export const otherRows = (index: number, bg: string = "white") => {
   } as any;
 };
 
-export const ovcTrackerFreezes = (index: number) => {
+export const ovcTrackerFreezes = (index: number, column: number = 0) => {
   if (index === 0) {
     return {
       position: "sticky",
-      // backgroundColor: "white",
+      backgroundColor: "#002060",
       w: "200px",
       minWidth: "200px",
       maxWidth: "200px",
       left: "0px",
-      top: "0px",
       zIndex: 2000,
+      top: "48px",
     } as any;
   }
   if (index === 1) {
@@ -116,17 +116,30 @@ export const ovcTrackerFreezes = (index: number) => {
       minW: "200px",
       maxWidth: "200px",
       left: "200px",
-      top: "0px",
+      backgroundColor: "#002060",
+      zIndex: 2000,
+      top: "48px",
+    } as any;
+  }
+  if (index === 2) {
+    return {
+      position: "sticky",
+      w: "200px",
+      minW: "200px",
+      maxWidth: "200px",
+      left: "200px",
+      // top: "48px",
+      backgroundColor: "#002060",
       zIndex: 2000,
     } as any;
   }
   return {
     top: "0px",
-    position: "sticky",
+    // position: "sticky",
   } as any;
 };
 
-export const ovcTrackerInnerColumns = (index: number) => {
+export const ovcTrackerInnerColumns = (index: number, column: number = 0) => {
   if (index === 0) {
     return {
       position: "sticky",
@@ -153,8 +166,9 @@ export const ovcTrackerInnerColumns = (index: number) => {
 export const secondHeader = (): any => {
   return {
     position: "sticky",
-    top: "50px",
+    top: "48px",
     zIndex: 10000,
+    backgroundColor: "#002060",
   };
 };
 

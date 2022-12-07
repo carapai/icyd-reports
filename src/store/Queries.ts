@@ -5910,6 +5910,22 @@ const computeOVCServiceTracker = async (
                 "ovcEligible.keyword": ["1", "NE", "No VL"],
               },
             },
+            {
+              bool: {
+                must_not: [
+                  {
+                    terms: {
+                      "memberStatus.keyword": [
+                        "Died",
+                        "Relocated",
+                        "Exited at Will",
+                        "Not eligible",
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
           ],
         },
       },
