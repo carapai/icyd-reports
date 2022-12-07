@@ -1,6 +1,8 @@
 import {
   Button,
   Checkbox,
+  CircularProgress,
+  CircularProgressLabel,
   Drawer,
   DrawerBody,
   DrawerCloseButton,
@@ -17,34 +19,32 @@ import {
   Stack,
   Text,
   useDisclosure,
-  Input,
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
-import { DatePicker, TreeSelect } from "antd";
-import { useState } from "react";
+import { DatePicker, Input, TreeSelect } from "antd";
 import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
-import { flatten, fromPairs } from "lodash";
-import { ChangeEvent, useRef } from "react";
+import { flatten } from "lodash";
+import moment from "moment";
+import { ChangeEvent, useRef, useState } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
 import XLSX from "xlsx";
 import {
-  addRemoveColumn2,
+  addRemoveColumn,
+  changeCode,
   changePeriod,
   setSelectedOrgUnits,
   setUserOrgUnits,
-  toggleColumns2,
-  changeCode,
+  toggleColumns,
 } from "../../store/Events";
-import { processPrevention } from "../../store/Queries";
-import { api } from "../../store/Queries";
 import {
-  $columns2,
-  $financialQuarter,
-  $isChecked,
-  $store,
-} from "../../store/Stores";
+  fetchGroupActivities4Instances,
+  fetchRelationships4Instances,
+  fetchUnits4Instances,
+  processInstances,
+} from "../../store/Queries";
+import { $columns, $isChecked, $store } from "../../store/Stores";
 
 function s2ab(s: any) {
   let buf = new ArrayBuffer(s.length);
@@ -67,10 +67,10 @@ const createQuery = (parent: any) => {
   };
 };
 
-const PreventionLayerFilter = () => {
+const OldDataSetLayerFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const [progress, setProgress] = useState<number>(0);
   const [code, setCode] = useState<string>("");
-
   const {
     isOpen: modalIsOpen,
     onOpen: modalOnOpen,
@@ -79,9 +79,9 @@ const PreventionLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const filteredColumns = useStore($columns2);
+  const columns = useStore($columns);
   const isChecked = useStore($isChecked);
-
+  const previousQuarter = moment(store.period.clone()).subtract(1, "quarter");
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
       const {
@@ -116,81 +116,145 @@ const PreventionLayerFilter = () => {
   };
 
   const download = async () => {
-    let must: any[] = [
-      {
-        term: {
-          ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
+    const trackedEntitiesQuery = {
+      results: {
+        resource: "trackedEntityInstances",
+        params: {
+          ouMode: "DESCENDANTS",
+          ou: store.selectedOrgUnits.join(";"),
+          fields: ["*"],
+          program: store.selectedProgram,
+          page: 1,
+          totalPages: true,
+          pageSize: 250,
         },
       },
-      {
-        bool: {
-          should: [
-            {
-              terms: {
-                ["level1.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level2.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level3.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level4.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level5.keyword"]: store.selectedOrgUnits,
-              },
-            },
-          ],
-        },
+    };
+
+    const {
+      results: {
+        trackedEntityInstances,
+        pager: { pageCount },
       },
-    ];
-    if (store.code) {
-      must = [
-        ...must,
-        {
-          match: {
-            ["HLKc2AKR9jW.keyword"]: store.code,
+    }: any = await engine.query(trackedEntitiesQuery);
+
+    const filteredInstances = trackedEntityInstances.filter(
+      (instance: any) =>
+        instance.inactive === false && instance.deleted === false
+    );
+
+    const indexCases = await fetchRelationships4Instances(
+      engine,
+      filteredInstances,
+      store.selectedOrgUnits.join(";")
+    );
+    const processedUnits = await fetchUnits4Instances(
+      engine,
+      filteredInstances
+    );
+    const groupActivities = await fetchGroupActivities4Instances(
+      engine,
+      filteredInstances,
+      store.selectedOrgUnits.join(";")
+    );
+
+    const servedPreviousQuarter = processInstances(
+      store.selectedProgram,
+      filteredInstances,
+      previousQuarter,
+      store.sessions,
+      indexCases,
+      processedUnits,
+      {
+        rows: [],
+        sessionNameIndex: 1,
+        participantIndex: 2,
+        sessionDateIndex: 3,
+      },
+      {}
+    );
+    const processedData = processInstances(
+      store.selectedProgram,
+      filteredInstances,
+      store.period,
+      store.sessions,
+      indexCases,
+      processedUnits,
+      groupActivities,
+      servedPreviousQuarter
+    );
+    let changedColumnData = Object.values(processedData).map((d: any) => {
+      return columns.map((c) => d[c.id] || "");
+    });
+    setProgress(progress + (1 / pageCount) * 100);
+    if (pageCount > 1) {
+      for (let page = 2; page <= pageCount; page++) {
+        const newQuery = {
+          results: {
+            resource: "trackedEntityInstances",
+            params: {
+              ouMode: "DESCENDANTS",
+              ou: store.selectedOrgUnits.join(";"),
+              fields: ["*"],
+              program: store.selectedProgram,
+              page,
+              pageSize: 250,
+            },
           },
-        },
-      ];
-    }
-    let {
-      data: { rows: allRows, columns, cursor: currentCursor },
-    } = await api.post("sql", {
-      query: `select * from layering2`,
-      filter: {
-        bool: {
-          must,
-        },
-      },
-    });
-    let availableRows = allRows.map((r: any) => {
-      return fromPairs(columns.map((c: any, i: number) => [c.name, r[i]]));
-    });
-    if (currentCursor) {
-      do {
-        let {
-          data: { rows, cursor },
-        } = await api.post("sql", { cursor: currentCursor });
-        availableRows = availableRows.concat(
-          rows.map((r: any) => {
-            return fromPairs(
-              columns.map((c: any, i: number) => [c.name, r[i]])
-            );
-          })
+        };
+        const {
+          results: { trackedEntityInstances },
+        }: any = await engine.query(newQuery);
+        const filteredInstances = trackedEntityInstances.filter(
+          (instance: any) =>
+            instance.inactive === false && instance.deleted === false
         );
-        currentCursor = cursor;
-      } while (!!currentCursor);
+
+        const indexCases = await fetchRelationships4Instances(
+          engine,
+          filteredInstances,
+          store.selectedOrgUnits.join(";")
+        );
+        const processedUnits = await fetchUnits4Instances(
+          engine,
+          filteredInstances
+        );
+        const groupActivities = await fetchGroupActivities4Instances(
+          engine,
+          filteredInstances,
+          store.selectedOrgUnits.join(";")
+        );
+        const servedPreviousQuarter = processInstances(
+          store.selectedProgram,
+          filteredInstances,
+          previousQuarter,
+          store.sessions,
+          indexCases,
+          processedUnits,
+          {
+            rows: [],
+            sessionNameIndex: 1,
+            participantIndex: 2,
+            sessionDateIndex: 3,
+          },
+          {}
+        );
+        const processedData = processInstances(
+          store.selectedProgram,
+          filteredInstances,
+          store.period,
+          store.sessions,
+          indexCases,
+          processedUnits,
+          groupActivities,
+          servedPreviousQuarter
+        );
+        let allData = Object.values(processedData).map((d: any) => {
+          return columns.map((c) => d[c.id] || "");
+        });
+        changedColumnData = [...changedColumnData, ...allData];
+        setProgress(progress + (page / pageCount) * 100);
+      }
     }
 
     let wb = XLSX.utils.book_new();
@@ -202,11 +266,10 @@ const PreventionLayerFilter = () => {
     };
 
     wb.SheetNames.push("Listing");
+
     let ws = XLSX.utils.aoa_to_sheet([
-      filteredColumns.map((c: any) => c.display),
-      ...availableRows.map((r: any) =>
-        filteredColumns.map((c: any) => r[c.id])
-      ),
+      columns.map((c) => c.display),
+      ...changedColumnData,
     ]);
     wb.Sheets["Listing"] = ws;
 
@@ -215,6 +278,7 @@ const PreventionLayerFilter = () => {
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
       "export.xlsx"
     );
+    setProgress(0);
     modalOnClose();
   };
 
@@ -246,7 +310,6 @@ const PreventionLayerFilter = () => {
           onChange={(value: any) => changePeriod(value)}
         />
       </Stack>
-
       <Stack direction="row" alignItems="center">
         <Text>Code:</Text>
         <Input
@@ -257,7 +320,6 @@ const PreventionLayerFilter = () => {
         />
       </Stack>
       <Button onClick={() => changeCode(code)}>Search</Button>
-
       <Spacer />
       <Stack direction="row" spacing={4}>
         <Button
@@ -291,8 +353,14 @@ const PreventionLayerFilter = () => {
               justifyItems="center"
               justifyContent="center"
               boxShadow="none"
+              flexDirection="column"
             >
-              <Text fontSize="xl">Downloading...</Text>
+              <CircularProgress value={progress} color="green.400">
+                <CircularProgressLabel>{`${progress.toFixed(
+                  0
+                )}%`}</CircularProgressLabel>
+              </CircularProgress>
+              <Text>Downloading please wait...</Text>
             </ModalBody>
           </ModalContent>
         </Modal>
@@ -310,20 +378,21 @@ const PreventionLayerFilter = () => {
               <Checkbox
                 isChecked={isChecked}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  toggleColumns2(e.target.checked)
+                  toggleColumns(e.target.checked)
                 }
               >
                 Choose Columns
               </Checkbox>
             </DrawerHeader>
+
             <DrawerBody>
               <List spacing={3}>
-                {store.columns2.map((c) => (
+                {store.columns.map((c) => (
                   <ListItem key={c.display}>
                     <Checkbox
                       isChecked={c.selected}
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        addRemoveColumn2({ value: e.target.checked, id: c.id })
+                        addRemoveColumn({ value: e.target.checked, id: c.id })
                       }
                     >
                       {c.display}
@@ -339,4 +408,4 @@ const PreventionLayerFilter = () => {
   );
 };
 
-export default PreventionLayerFilter;
+export default OldDataSetLayerFilter;

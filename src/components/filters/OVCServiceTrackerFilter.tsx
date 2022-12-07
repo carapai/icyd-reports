@@ -1,46 +1,34 @@
-import {
-  Input,
-  Radio,
-  RadioGroup,
-  Spinner,
-  Stack,
-  Text,
-  Box,
-  Button,
-  Spacer,
-} from "@chakra-ui/react";
+import { Button, Spacer, Stack, Text } from "@chakra-ui/react";
 import { DatePicker } from "antd";
 import { GroupBase, Select } from "chakra-react-select";
 import { useStore } from "effector-react";
-import { Option, DistrictOption } from "../../interfaces";
+import { DistrictOption } from "../../interfaces";
 import { $store } from "../../store/Stores";
 
-type OVCMISReportFilterProps = {
+type OVCServiceTrackerFilterProps = {
   districts: DistrictOption[];
-  onDistrictChange: (selected: DistrictOption[]) => void;
+  onDistrictChange: (district: DistrictOption[]) => void;
   period: any;
   onPeriodChange: (period: any) => void;
-  onDownload: () => boolean;
 };
 
-const OVCMISReportFilter = ({
-  districts,
-  onDistrictChange,
+const OVCServiceTrackerFilter = ({
   period,
+  districts,
   onPeriodChange,
-  onDownload,
-}: OVCMISReportFilterProps) => {
+  onDistrictChange,
+}: OVCServiceTrackerFilterProps) => {
   const store = useStore($store);
   return (
     <Stack direction="row" alignItems="center">
-      <Text>District:</Text>
-      <Stack zIndex={10000} w="300px">
+      <Text>Districts:</Text>
+      <Stack zIndex={10000} w="500px">
         <Select<DistrictOption, true, GroupBase<DistrictOption>>
           isMulti
           options={store.districts}
           isClearable
           size="sm"
-          value={districts.filter(
+          value={store.districts.filter(
             (d) =>
               districts.findIndex((district) => district.value === d.value) !==
               -1
@@ -60,10 +48,9 @@ const OVCMISReportFilter = ({
         value={period}
         onChange={(value: any) => onPeriodChange(value)}
       />
-      {/* <Spacer />
-      <Button onClick={() => onDownload()}>Download</Button> */}
+      {/* <Button onClick={() => onDownload()}>Download</Button> */}
     </Stack>
   );
 };
 
-export default OVCMISReportFilter;
+export default OVCServiceTrackerFilter;

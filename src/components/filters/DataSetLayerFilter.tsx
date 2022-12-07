@@ -1,6 +1,7 @@
 import {
   Button,
   Checkbox,
+  CircularProgress,
   Drawer,
   DrawerBody,
   DrawerCloseButton,
@@ -9,46 +10,35 @@ import {
   DrawerOverlay,
   List,
   ListItem,
-  Spacer,
-  Stack,
-  Text,
-  useDisclosure,
-  Box,
-  DrawerFooter,
-  Flex,
-  Heading,
   Modal,
   ModalBody,
   ModalContent,
   ModalOverlay,
-  Progress,
+  Spacer,
+  Stack,
+  Text,
+  useDisclosure,
 } from "@chakra-ui/react";
-import { saveAs } from "file-saver";
-import XLSX from "xlsx";
 import { useDataEngine } from "@dhis2/app-runtime";
-import { DatePicker, TreeSelect } from "antd";
+import { DatePicker, Input, TreeSelect } from "antd";
 import "antd/dist/antd.css";
 import { useStore } from "effector-react";
-import { flatten } from "lodash";
+import { saveAs } from "file-saver";
+import { flatten, fromPairs } from "lodash";
 import { ChangeEvent, useRef, useState } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
-import { columns } from "../../store/Constants";
+import XLSX from "xlsx";
 import {
   addRemoveColumn,
+  changeCode,
   changePeriod,
   setSelectedOrgUnits,
   setUserOrgUnits,
   toggleColumns,
 } from "../../store/Events";
+import { api } from "../../store/Queries";
 import { $columns, $isChecked, $store } from "../../store/Stores";
-import { processInstances } from "../../store/Queries";
-
-function s2ab(s: any) {
-  let buf = new ArrayBuffer(s.length);
-  let view = new Uint8Array(buf);
-  for (var i = 0; i < s.length; i++) view[i] = s.charCodeAt(i) & 0xff;
-  return buf;
-}
+import { s2ab } from "../../store/utils";
 
 const createQuery = (parent: any) => {
   return {
@@ -66,6 +56,7 @@ const createQuery = (parent: any) => {
 
 const DataSetLayerFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const [code, setCode] = useState<string>("");
   const {
     isOpen: modalIsOpen,
     onOpen: modalOnOpen,
@@ -74,7 +65,7 @@ const DataSetLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const columns = useStore($columns);
+  const filteredColumns = useStore($columns);
   const isChecked = useStore($isChecked);
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
@@ -110,70 +101,78 @@ const DataSetLayerFilter = () => {
   };
 
   const download = async () => {
-    const trackedEntitiesQuery = {
-      results: {
-        resource: "trackedEntityInstances",
-        params: {
-          ouMode: "DESCENDANTS",
-          ou: store.selectedOrgUnits.join(";"),
-          fields: ["*"],
-          program: store.selectedProgram,
-          page: 1,
-          totalPages: true,
-          pageSize: 250,
+    let must: any[] = [
+      {
+        term: {
+          ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
         },
       },
-    };
-
-    const {
-      results: {
-        trackedEntityInstances,
-        pager: { pageCount },
+      {
+        bool: {
+          should: [
+            {
+              terms: {
+                ["level1.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level2.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level3.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level4.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level5.keyword"]: store.selectedOrgUnits,
+              },
+            },
+          ],
+        },
       },
-    }: any = await engine.query(trackedEntitiesQuery);
-    const processedData = await processInstances(
-      engine,
-      store.selectedProgram,
-      trackedEntityInstances.filter((a: any) => a.inactive === false),
-      store.period,
-      store.selectedOrgUnits.join(";"),
-      store.sessions
-    );
-    let changedColumnData = processedData.map((d) => {
-      return columns.map((c) => d[c.id] || "");
+    ];
+    if (store.code) {
+      must = [
+        ...must,
+        {
+          match: {
+            ["HLKc2AKR9jW.keyword"]: store.code,
+          },
+        },
+      ];
+    }
+    let {
+      data: { rows: allRows, columns, cursor: currentCursor },
+    } = await api.post("sql", {
+      query: `select ${filteredColumns
+        .map((c) => c.id)
+        .join(", ")} from layering`,
+      filter: {
+        bool: {
+          must,
+        },
+      },
     });
 
-    if (pageCount > 1) {
-      for (let page = 2; page <= pageCount; page++) {
-        const newQuery = {
-          results: {
-            resource: "trackedEntityInstances",
-            params: {
-              ouMode: "DESCENDANTS",
-              ou: store.selectedOrgUnits.join(";"),
-              fields: ["*"],
-              program: store.selectedProgram,
-              page,
-              pageSize: 250,
-            },
-          },
-        };
-        const {
-          results: { trackedEntityInstances },
-        }: any = await engine.query(newQuery);
-        const processedData = await processInstances(
-          engine,
-          store.selectedProgram,
-          trackedEntityInstances,
-          store.period,
-          store.selectedOrgUnits.join(";"),
-          store.sessions
-        );
-        let allData = processedData.map((d) => {
-          return columns.map((c) => d[c.id] || "");
-        });
-        changedColumnData = [...changedColumnData, ...allData];
-      }
+    const processedColumns = fromPairs(
+      filteredColumns.map((c) => [c.id, c.display])
+    );
+    if (currentCursor) {
+      do {
+        let {
+          data: { rows, cursor },
+        } = await api.post("sql", { cursor: currentCursor });
+        allRows = allRows.concat(rows);
+        currentCursor = cursor;
+      } while (!!currentCursor);
     }
 
     let wb = XLSX.utils.book_new();
@@ -185,15 +184,13 @@ const DataSetLayerFilter = () => {
     };
 
     wb.SheetNames.push("Listing");
-
     let ws = XLSX.utils.aoa_to_sheet([
-      columns.map((c) => c.display),
-      ...changedColumnData,
+      columns.map((c: any) => processedColumns[c.name] || c.name),
+      ...allRows,
     ]);
     wb.Sheets["Listing"] = ws;
 
     const wbout = XLSX.write(wb, { bookType: "xlsx", type: "binary" });
-
     saveAs(
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
       "export.xlsx"
@@ -229,6 +226,16 @@ const DataSetLayerFilter = () => {
           onChange={(value: any) => changePeriod(value)}
         />
       </Stack>
+      <Stack direction="row" alignItems="center">
+        <Text>Code:</Text>
+        <Input
+          value={code}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            setCode(e.target.value)
+          }
+        />
+      </Stack>
+      <Button onClick={() => changeCode(code)}>Search</Button>
       <Spacer />
       <Stack direction="row" spacing={4}>
         <Button
@@ -262,8 +269,10 @@ const DataSetLayerFilter = () => {
               justifyItems="center"
               justifyContent="center"
               boxShadow="none"
+              flexDirection="column"
             >
-              <Text fontSize="xl">Downloading...</Text>
+              <CircularProgress isIndeterminate />
+              <Text>Downloading please wait...</Text>
             </ModalBody>
           </ModalContent>
         </Modal>

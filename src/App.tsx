@@ -1,4 +1,4 @@
-import { Box, Link, useColorModeValue } from "@chakra-ui/react";
+import { Box, Link, Spinner, Stack, useColorModeValue } from "@chakra-ui/react";
 import { ReactNode } from "react";
 import {
   HashRouter as Router,
@@ -8,11 +8,13 @@ import {
   Switch,
 } from "react-router-dom";
 import { Navigation } from "./components/Navigation";
+import ComprehensiveGroupActivityLayering from "./pages/ComprehensiveGroupActivityLayering";
 import DataSetLayer from "./pages/DataSetLayer";
 import GroupActivityLayer from "./pages/GroupActivityLayer";
 import IndicatorReport from "./pages/IndicatorReport";
 import OVCMISReport from "./pages/OVCMISReport";
 import OVCServiceTracker from "./pages/OVCServiceTracker";
+import PreventionLayer from "./pages/PreventionLayer";
 import { useLoader } from "./store/Queries";
 
 const Links = [
@@ -42,7 +44,17 @@ const App = () => {
   const { isLoading, isSuccess, isError, error } = useLoader();
   return (
     <>
-      {isLoading && <Box>Loading ...</Box>}
+      {isLoading && (
+        <Stack
+          h="calc(100vh - 48px)"
+          alignItems="center"
+          justifyContent="center"
+          justifyItems="center"
+          alignContent="center"
+        >
+          <Spinner />
+        </Stack>
+      )}
       {isSuccess && (
         <Router>
           <Navigation />
@@ -60,7 +72,10 @@ const App = () => {
               <OVCMISReport />
             </Route>
             <Route path="/group-activity-data-layer">
-              <GroupActivityLayer />
+              <PreventionLayer />
+            </Route>
+            <Route path="/comprehensive-group-activity-layering">
+              <ComprehensiveGroupActivityLayering />
             </Route>
             <Redirect to="/" />
           </Switch>

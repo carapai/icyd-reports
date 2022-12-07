@@ -1,4 +1,4 @@
-import { columns, columns2 } from "./Constants";
+import { columns, columns2, columns3 } from "./Constants";
 import { Store } from "../interfaces";
 import { domain } from "./Domains";
 import {
@@ -13,6 +13,9 @@ import {
   setSessions,
   addRemoveColumn2,
   toggleColumns2,
+  changeCode,
+  setSubCounties,
+  setDistricts,
 } from "./Events";
 import moment from "moment";
 import { every } from "lodash";
@@ -30,7 +33,11 @@ export const $store = domain
     period: moment(),
     columns: columns,
     columns2: columns2,
+    columns3: columns3,
     sessions: {},
+    code: "",
+    subCounties: {},
+    districts: [],
   })
   .on(setUserOrgUnits, (state, userOrgUnits) => {
     return { ...state, userOrgUnits };
@@ -82,6 +89,15 @@ export const $store = domain
   })
   .on(setSessions, (state, sessions) => {
     return { ...state, sessions };
+  })
+  .on(changeCode, (state, code) => {
+    return { ...state, code };
+  })
+  .on(setSubCounties, (state, subCounties) => {
+    return { ...state, subCounties };
+  })
+  .on(setDistricts, (state, districts) => {
+    return { ...state, districts };
   });
 
 export const $columns = $store.map((state) => {

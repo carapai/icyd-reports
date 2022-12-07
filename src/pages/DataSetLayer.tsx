@@ -7,6 +7,6 @@ const DataSetLayer = () => {
       <DataSetLayerFilter />
       <DataSetLayerTable />
     </Stack>
-  )
-}
-export default DataSetLayer
+  );
+};
+export default DataSetLayer;

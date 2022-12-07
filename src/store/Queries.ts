@@ -1,3 +1,4 @@
+import { DistrictOption } from "./../interfaces";
 import { useDataEngine } from "@dhis2/app-runtime";
 import {
   differenceInMonths,
@@ -5,16 +6,147 @@ import {
   isBefore,
   isWithinInterval,
   parseISO,
-  subYears,
 } from "date-fns";
-import { every, fromPairs, groupBy, has, maxBy, sortBy, uniq } from "lodash";
+import {
+  every,
+  fromPairs,
+  groupBy,
+  has,
+  max,
+  maxBy,
+  sortBy,
+  sum,
+  times,
+  uniq,
+} from "lodash";
+import moment from "moment";
+import axios from "axios";
 import { useQuery } from "react-query";
+const kampalaDivisions = [
+  { label: "CENTRAL", value: "QT7n2EnRLbh" },
+  { label: "KAWEMPE", value: "y1j39xhbozk" },
+  { label: "MAKINDYE", value: "eoEtIOqm90L" },
+  { label: "NAKAWA", value: "I6oe4U5UT5d" },
+  { label: "RUBAGA", value: "CSJ23GHbZAo" },
+];
 import {
   changeTotal,
+  setDistricts,
   setSelectedOrgUnits,
   setSessions,
+  setSubCounties,
   setUserOrgUnits,
 } from "./Events";
+import {
+  calculateQuarter,
+  findQuarters,
+  indicatorReportQueries,
+  ovcTrackerIndicators,
+  ovcTrackerPreventionIndicators,
+} from "./utils";
+import { Option } from "../interfaces";
+import { districts, indicatorReportColumns } from "./Constants";
+
+const computePercentage = (numerator: number, denominator: number) => {
+  if (denominator !== 0) {
+    return numerator / denominator;
+  }
+  return 0;
+};
+
+const risks: { [key: string]: string } = {
+  "Child of Non suppressed HIV+ Caregiver": "Child of HIV+ Caregiver",
+  "Child of suppressed HIV+ Caregiver": "Child of HIV+ Caregiver",
+  "Adolescent (9-14 yrs)": "Siblings of Index Child",
+  "Malnourished (0-5 Yrs)": "Siblings of Index Child",
+};
+
+export const api = axios.create({
+  baseURL: "https://data.icyd.hispuganda.org/api/wal/",
+});
+
+const prevConditions = [
+  {
+    term: {
+      "Completed MOH Journeys": 1,
+    },
+  },
+  {
+    term: {
+      "Completed NMN Boys": 1,
+    },
+  },
+  {
+    term: {
+      "Completed NMN Boys New Curriculum": 1,
+    },
+  },
+  {
+    term: {
+      "Completed NMN Girls": 1,
+    },
+  },
+];
+const processRows = (ind: string, rows: any[][]) => {
+  return fromPairs(
+    rows.map((row: string[]) => [
+      `${ind}${row.slice(0, -1).join("")}`,
+      Number(row[row.length - 1]),
+    ])
+  );
+};
+
+const convertIndicators = (
+  fromIndicators: string[],
+  toIndicators: string[],
+  quarters: string[],
+  data: any
+) => {
+  let results = {};
+  quarters.forEach((quarter) => {
+    fromIndicators.forEach((indicator, index) => {
+      const value = data[`${indicator}${quarter}`] || 0;
+      const toIndicator = toIndicators[index];
+      results = { ...results, [`${toIndicator}${quarter}`]: value };
+    });
+  });
+
+  return results;
+};
+const getTotal = (ind: string, rows: any[][]) => {
+  if (rows.length > 0) {
+    const first = rows[0];
+    if (first.length === 4) {
+      return fromPairs(
+        Object.entries(
+          groupBy(rows, (row) => `${row[row.length - 3]}${row[row.length - 2]}`)
+        ).map(([key, value]) => {
+          return [
+            `${ind}totals${key}`,
+            sum(value.map((vrow) => vrow[vrow.length - 1])),
+          ];
+        })
+      );
+    }
+
+    if (first.length === 3) {
+      return fromPairs(
+        Object.entries(groupBy(rows, (row) => row[row.length - 2])).map(
+          ([key, value]) => {
+            return [
+              `${ind}totals${key}`,
+              sum(value.map((vrow) => vrow[vrow.length - 1])),
+            ];
+          }
+        )
+      );
+    }
+    return { [`${ind}totals`]: sum(rows.map((row) => row[row.length - 1])) };
+  }
+  return {};
+};
+
+let realColumns: any[] = [];
 
 const findAgeGroup = (age: number) => {
   if (age <= 0) {
@@ -48,13 +180,29 @@ const mapping: any = {
   "MOH Journeys curriculum": "Completed MOH Journeys",
   "No means No sessions (Boys)": "Completed NMN Boys",
   "No means No sessions (Girls)": "Completed NMN Girls",
+  "No means No sessions (Boys) New Curriculum":
+    "Completed NMN Boys New Curriculum",
+
+  SINOVUYO: "Completed SINOVUYO",
+  ECD: "Completed SINOVUYO",
+  "Saving and Borrowing": "Completed Saving and Borrowing",
+  "SPM Training": "Completed SPM Training",
+  "Financial Literacy": "Completed Financial Literacy",
+  "VSLA Methodology": "Completed VSLA Methodology",
 };
 const mapping2: any = {
   "MOE Journeys Plus": 18,
-  "MOH Journeys curriculum": 21,
+  "MOH Journeys curriculum": 18,
   "No means No sessions (Boys)": 4,
   "No means No sessions (Girls)": 5,
+  "No means No sessions (Boys) New Curriculum": 8,
   SINOVUYO: 10,
+
+  ECD: 5,
+  "Saving and Borrowing": 6,
+  "SPM Training": 5,
+  "Financial Literacy": 4,
+  "VSLA Methodology": 7,
 };
 
 const hadASession = (
@@ -79,6 +227,46 @@ const hadASession = (
   });
 };
 
+const fetchTargets = async (
+  engine: any,
+  dataElements: string[],
+  organisationUnits: string[],
+  periods: string[]
+) => {
+  const query = `analytics.json?dimension=dx:${dataElements.join(
+    ";"
+  )}&dimension=ou:${organisationUnits.join(";")}&filter=pe:${periods.join(
+    ";"
+  )}&skipRounding=true&skipMeta=true`;
+
+  const { analytics } = await engine.query({
+    analytics: {
+      resource: query,
+    },
+  });
+  return analytics;
+};
+
+const fetchTargets2 = async (
+  engine: any,
+  dataElements: string[],
+  organisationUnits: string[],
+  periods: string[]
+) => {
+  const query = `analytics.json?dimension=dx:${dataElements.join(
+    ";"
+  )}&filter=ou:${organisationUnits.join(";")}&dimension=pe:${periods.join(
+    ";"
+  )}&skipRounding=true&skipMeta=true`;
+
+  const { analytics } = await engine.query({
+    analytics: {
+      resource: query,
+    },
+  });
+  return analytics;
+};
+
 const hasCompleted = (
   allSessions: string[][],
   participantIndex: number,
@@ -95,6 +283,32 @@ const hasCompleted = (
         row[participantIndex] === participant &&
         sessions.indexOf(row[sessionNameIndex]) !== -1 &&
         parseISO(row[sessionDateIndex]).getTime() <= endDate.getTime()
+      );
+    })
+    .map((row: string[]) => row[sessionNameIndex]);
+  return doneSessions.length >= value;
+};
+
+const hasCompletedWithin = (
+  allSessions: string[][],
+  participantIndex: number,
+  sessionNameIndex: number,
+  sessionDateIndex: number,
+  participant: string,
+  startDate: Date,
+  endDate: Date,
+  sessions: string[],
+  value: number
+) => {
+  const doneSessions = allSessions
+    .filter((row: string[]) => {
+      return (
+        row[participantIndex] === participant &&
+        sessions.indexOf(row[sessionNameIndex]) !== -1 &&
+        isWithinInterval(parseISO(row[sessionDateIndex]), {
+          start: startDate,
+          end: endDate,
+        })
       );
     })
     .map((row: string[]) => row[sessionNameIndex]);
@@ -250,7 +464,7 @@ const allHaveValue = (
 const checkRiskAssessment = (
   event: any | undefined,
   dataElements: string[],
-  value: any
+  value?: any
 ) => {
   if (event) {
     const de = dataElements
@@ -260,19 +474,17 @@ const checkRiskAssessment = (
       return 0;
     }
     if (de.length < dataElements.length) {
-      if (every(de, (v) => v === value)) {
+      if (value && every(de, (v) => v === value)) {
         return 3;
-      }
-      if (de.indexOf(value) === -1) {
+      } else if (value && de.indexOf(value) !== -1) {
         return 2;
       }
       return 1;
     }
     if (de.length === dataElements.length) {
-      if (every(de, (v) => v === value)) {
+      if (value && every(de, (v) => v === value)) {
         return 6;
-      }
-      if (de.indexOf(value) === -1) {
+      } else if (value && de.indexOf(value) !== -1) {
         return 5;
       }
       return 4;
@@ -302,7 +514,8 @@ export function useLoader() {
     me: {
       resource: "me.json",
       params: {
-        fields: "organisationUnits[*]",
+        fields:
+          "dataViewOrganisationUnits[id,name,leaf,level,parent[id,name],children[id,name]]",
       },
     },
     relationships: {
@@ -327,6 +540,12 @@ export function useLoader() {
     },
     Boys: {
       resource: "optionGroups/WuPXlmvSfVJ",
+      params: {
+        fields: "options[code]",
+      },
+    },
+    BoysNew: {
+      resource: "optionGroups/TIObJloCVdC",
       params: {
         fields: "options[code]",
       },
@@ -385,14 +604,31 @@ export function useLoader() {
         fields: "options[code]",
       },
     },
+    districts: {
+      resource: "organisationUnits.json",
+      params: {
+        level: 3,
+        paging: "false",
+        fields: "id~rename(value),name~rename(label)",
+      },
+    },
+    subCounties: {
+      resource: "organisationUnits.json",
+      params: {
+        level: 4,
+        paging: "false",
+        fields: "id,name,parent[id,name]",
+      },
+    },
   };
   return useQuery<any, Error>("sqlViews", async () => {
     const {
-      me: { organisationUnits },
+      me: { dataViewOrganisationUnits },
       relationships: { relationshipTypes },
       MOE: { options },
       MOH: { options: options1 },
       Boys: { options: options2 },
+      BoysNew: { options: options12 },
       Girls: { options: options3 },
       VSLA: { options: options4 },
       VSLATOT: { options: options5 },
@@ -402,8 +638,10 @@ export function useLoader() {
       SINOVUYO: { options: options9 },
       ECD: { options: options10 },
       SAVING: { options: options11 },
+      districts: { organisationUnits: foundDistricts },
+      subCounties: { organisationUnits: counties },
     }: any = await engine.query(query);
-    const processedUnits = organisationUnits.map((unit: any) => {
+    const processedUnits = dataViewOrganisationUnits.map((unit: any) => {
       return {
         id: unit.id,
         pId: unit.pId || "",
@@ -412,12 +650,26 @@ export function useLoader() {
         isLeaf: unit.leaf,
       };
     });
+    const processedSubCounties = groupBy(
+      counties.map(({ id, name, parent: { id: pId, name: pName } }: any) => {
+        return {
+          id,
+          name,
+          parent: pId,
+          parentName: pName,
+        };
+      }),
+      "parent"
+    );
     setUserOrgUnits(processedUnits);
-    setSelectedOrgUnits(organisationUnits.map((u: any) => u.id));
+    setSelectedOrgUnits([dataViewOrganisationUnits[0].id]);
     setSessions({
       "MOE Journeys Plus": options.map((o: any) => o.code),
       "MOH Journeys curriculum": options1.map((o: any) => o.code),
       "No means No sessions (Boys)": options2.map((o: any) => o.code),
+      "No means No sessions (Boys) New Curriculum": options12.map(
+        (o: any) => o.code
+      ),
       "No means No sessions (Girls)": options3.map((o: any) => o.code),
       "VSLA Methodology": options4.map((o: any) => o.code),
       "VSLA TOT": options5.map((o: any) => o.code),
@@ -428,9 +680,182 @@ export function useLoader() {
       ECD: options10.map((o: any) => o.code),
       "Saving and Borrowing": options11.map((o: any) => o.code),
     });
+
+    const allDistricts = fromPairs<string>(
+      [...foundDistricts, ...kampalaDivisions].map(({ label, value }: any) => [
+        String(label).split(" ")[0].toUpperCase(),
+        value,
+      ])
+    );
+    const maxLevel = max(
+      dataViewOrganisationUnits.map(({ level }: any) => level)
+    );
+    setDistricts(
+      districts.flatMap(({ ip, district }: any) => {
+        const found: DistrictOption = {
+          ip,
+          value: allDistricts[district] || "",
+          label: district,
+        };
+        if (maxLevel === 1) {
+          return found;
+        } else if (
+          maxLevel === 2 &&
+          dataViewOrganisationUnits
+            .flatMap(({ children, id }: any) => {
+              if (id === "H3bSPcb6rqc") {
+                return [
+                  ...children.map(({ id }: any) => id),
+                  ...kampalaDivisions.map(({ value }) => value),
+                ];
+              }
+              return children.map(({ id }: any) => id);
+            })
+            .indexOf(found.value) !== -1
+        ) {
+        } else if (
+          maxLevel === 3 &&
+          dataViewOrganisationUnits
+            .flatMap(({ id }: any) => {
+              if (id === "aXmBzv61LbM") {
+                return kampalaDivisions.map(({ value }) => value);
+              }
+              return id;
+            })
+            .indexOf(found.value) !== -1
+        ) {
+          return found;
+        }
+
+        return [];
+      })
+    );
+    setSubCounties(processedSubCounties);
     return true;
   });
 }
+
+export const fetchUnits4Instances = async (
+  engine: any,
+  trackedEntityInstances: any[]
+) => {
+  const orgUnits = uniq(
+    trackedEntityInstances.map(({ orgUnit }: any) => orgUnit)
+  );
+
+  const {
+    hierarchy: { organisationUnits },
+  } = await engine.query({
+    hierarchy: {
+      resource: "organisationUnits.json",
+      params: {
+        filter: `id:in:[${orgUnits.join(",")}]`,
+        fields: "id,parent[name,parent[name]]",
+        paging: "false",
+      },
+    },
+  });
+  return fromPairs(
+    organisationUnits.map((unit: any) => {
+      return [
+        unit.id,
+        { subCounty: unit.parent?.name, district: unit.parent?.parent?.name },
+      ];
+    })
+  );
+};
+
+export const fetchRelationships4Instances = async (
+  engine: any,
+  trackedEntityInstances: any[],
+  ou: string
+) => {
+  const currentData = trackedEntityInstances.map(
+    ({ relationships: [relationship] }) => {
+      if (relationship) {
+        return relationship?.from?.trackedEntityInstance.trackedEntityInstance;
+      }
+    }
+  );
+  const {
+    indexes: { trackedEntityInstances: indexCases },
+  } = await engine.query({
+    indexes: {
+      resource: "trackedEntityInstances",
+      params: {
+        fields:
+          "trackedEntityInstance,attributes,enrollments[enrollmentDate,program,events[eventDate,programStage,dataValues]]",
+        ou,
+        ouMode: "DESCENDANTS",
+        program: "HEWq6yr4cs5",
+        trackedEntityInstance: uniq(currentData).join(";"),
+        skipPaging: "true",
+      },
+    },
+  });
+  return fromPairs(
+    indexCases.map((indexCase: any) => {
+      return [indexCase.trackedEntityInstance, indexCase];
+    })
+  );
+};
+
+export const fetchGroupActivities4Instances = async (
+  engine: any,
+  trackedEntityInstances: any[],
+  ou: string
+) => {
+  const householdMemberCodes = trackedEntityInstances.flatMap(
+    ({ attributes }: any) => {
+      const attribute = attributes.find(
+        (a: any) => a.attribute === "HLKc2AKR9jW"
+      );
+      if (attribute) {
+        return [attribute.value];
+      }
+      return [];
+    }
+  );
+
+  const facilities = uniq(
+    trackedEntityInstances.map(({ orgUnit }) => {
+      return orgUnit;
+    })
+  );
+
+  const allQueries = facilities.map((f) => {
+    return [
+      f,
+      {
+        resource: "events/query.json",
+        params: {
+          orgUnit: f,
+          programStage: "VzkQBBglj3O",
+          skipPaging: "true",
+          filter: `ypDUCAS6juy:IN:${householdMemberCodes.join(";")}`,
+        },
+      },
+    ];
+  });
+
+  const data = await engine.query(fromPairs(allQueries));
+
+  // const sessionNameIndex = headers.findIndex(
+  //   (header: any) => header.name === "n20LkH4ZBF8"
+  // );
+  // const participantIndex = headers.findIndex(
+  //   (header: any) => header.name === "ypDUCAS6juy"
+  // );
+  // const sessionDateIndex = headers.findIndex(
+  //   (header: any) => header.name === "eventDate"
+  // );
+  return {
+    rows: [],
+    sessionNameIndex: 1,
+    participantIndex: 2,
+    sessionDateIndex: 3,
+  };
+};
 
 export const processPrevention = async (
   engine: any,
@@ -474,7 +899,6 @@ export const processPrevention = async (
       const instance = fromPairs(
         attributes.map((a: any) => [a.attribute, a.value])
       );
-
       const doneSessions = events
         .filter((event: any) => {
           return (
@@ -534,101 +958,31 @@ export const processPrevention = async (
   );
 };
 
-export const processInstances = async (
-  engine: any,
+export const processInstances = (
   program: string,
   trackedEntityInstances: any[],
-  period: any,
-  ou: string,
-  sessions: { [key: string]: string[] }
+  period: moment.Moment,
+  sessions: { [key: string]: string[] },
+  indexCases: { [key: string]: any },
+  processedUnits: { [key: string]: any },
+  groupActivities: {
+    rows: string[][];
+    sessionNameIndex: number;
+    participantIndex: number;
+    sessionDateIndex: number;
+  },
+  previousData: { [key: string]: any }
 ) => {
-  const quarterStart = period.startOf("quarter").toDate();
-  const quarterEnd = period.endOf("quarter").toDate();
-  const orgUnits = uniq(
-    trackedEntityInstances.map(({ orgUnit }: any) => orgUnit)
+  const quarterStart: Date = period.startOf("quarter").toDate();
+  const quarterEnd: Date = period.endOf("quarter").toDate();
+  const [financialQuarterStart, financialQuarterEnd] = calculateQuarter(
+    quarterStart.getFullYear(),
+    period.quarter()
   );
-
-  const currentData = trackedEntityInstances.map(
-    ({ relationships: [relationship] }) => {
-      if (relationship) {
-        return relationship?.from?.trackedEntityInstance.trackedEntityInstance;
-      }
-    }
-  );
-  const {
-    indexes: { trackedEntityInstances: indexCases },
-    hierarchy: { organisationUnits },
-  } = await engine.query({
-    indexes: {
-      resource: "trackedEntityInstances",
-      params: {
-        fields: "*",
-        ou,
-        ouMode: "DESCENDANTS",
-        program: "HEWq6yr4cs5",
-        trackedEntityInstance: uniq(currentData).join(";"),
-        skipPaging: "true",
-      },
-    },
-    hierarchy: {
-      resource: "organisationUnits.json",
-      params: {
-        filter: `id:in:[${orgUnits.join(",")}]`,
-        fields: "id,parent[name,parent[name]]",
-        paging: "false",
-      },
-    },
-  });
-
-  const householdMemberCodes = trackedEntityInstances.flatMap(
-    ({ attributes }: any) => {
-      const attribute = attributes.find(
-        (a: any) => a.attribute === "HLKc2AKR9jW"
-      );
-      if (attribute) {
-        return [attribute.value];
-      }
-      return [];
-    }
-  );
-
-  const {
-    sessions: { headers, rows },
-  } = await engine.query({
-    sessions: {
-      resource: "events/query.json",
-      params: {
-        ou,
-        ouMode: "DESCENDANTS",
-        programStage: "VzkQBBglj3O",
-        skipPaging: "true",
-        filter: `ypDUCAS6juy:IN:${householdMemberCodes.join(";")}`,
-      },
-    },
-  });
-
-  const sessionNameIndex = headers.findIndex(
-    (header: any) => header.name === "n20LkH4ZBF8"
-  );
-  const participantIndex = headers.findIndex(
-    (header: any) => header.name === "ypDUCAS6juy"
-  );
-  const sessionDateIndex = headers.findIndex(
-    (header: any) => header.name === "eventDate"
-  );
-
-  const processedUnits = fromPairs(
-    organisationUnits.map((unit: any) => {
-      return [
-        unit.id,
-        { subCounty: unit.parent?.name, district: unit.parent?.parent?.name },
-      ];
-    })
-  );
-
+  const { rows, sessionNameIndex, participantIndex, sessionDateIndex } =
+    groupActivities;
   const instances = trackedEntityInstances.map(
     ({
-      created,
       orgUnit,
       attributes,
       trackedEntityInstance,
@@ -638,11 +992,9 @@ export const processInstances = async (
       const units: any = processedUnits[orgUnit];
       const [{ trackedEntityInstance: eventInstance, orgUnitName }] =
         enrollments;
-
       const [enrollmentDate] = enrollments
         .map((e: any) => e.enrollmentDate)
         .sort();
-
       const allEvents = enrollments.flatMap(({ events }: any) => {
         return events
           .filter(({ deleted }: any) => deleted === false)
@@ -662,11 +1014,10 @@ export const processInstances = async (
           });
       });
 
-      const parent = indexCases.find(
-        ({ trackedEntityInstance }: any) =>
-          relationship?.from?.trackedEntityInstance.trackedEntityInstance ===
-          trackedEntityInstance
-      );
+      const parent =
+        indexCases[
+          relationship?.from?.trackedEntityInstance.trackedEntityInstance
+        ];
 
       let child: any = fromPairs(
         attributes.map(({ attribute, value }: any) => [
@@ -676,7 +1027,6 @@ export const processInstances = async (
       );
       child = {
         trackedEntityInstance,
-        [`${program}.created`]: created,
         [`${program}.orgUnit`]: orgUnit,
         [`${program}.orgUnitName`]: orgUnitName,
         [`${program}.enrollmentDate`]: enrollmentDate,
@@ -686,38 +1036,51 @@ export const processInstances = async (
       };
       if (parent) {
         const {
-          enrollments: [
-            {
-              enrollmentDate,
-              created,
-              orgUnit,
-              orgUnitName,
-              program: parentProgram,
-              events: [event],
-            },
-          ],
+          enrollments: [{ enrollmentDate, program: parentProgram, events }],
         } = parent;
+
+        let event: any = null;
+
+        if (events.length > 0) {
+          event = sortBy(events, (e) => e.eventDate).reverse()[0];
+        }
         let eventDetails = {
-          [`${parentProgram}.created`]: created,
-          [`${parentProgram}.orgUnit`]: orgUnit,
-          [`${parentProgram}.orgUnitName`]: orgUnitName,
           [`${parentProgram}.enrollmentDate`]: enrollmentDate,
         };
         if (event) {
-          const {
-            dataValues,
-            programStage: parentProgramStage,
-            eventDate,
-          } = event;
+          const healthExpenses = event.dataValues.find(
+            (e: any) => e.dataElement === "zbAGBW6PsGd"
+          );
+          const schoolExpenses = event.dataValues.find(
+            (e: any) => e.dataElement === "kQCB9F39zWO"
+          );
+          const foodExpenses = event.dataValues.find(
+            (e: any) => e.dataElement === "iRJUDyUBLQF"
+          );
+          const score18 = [
+            healthExpenses?.value,
+            foodExpenses?.value,
+            schoolExpenses?.value,
+          ].filter((v: any) => v !== undefined && v !== null);
+
+          const yeses = score18.filter((v: string) => v === "Yes").length;
+          const noses = score18.filter((v: string) => v === "No").length;
+          let houseHoldType = "";
+          const { programStage: parentProgramStage, eventDate } = event;
+
+          if (score18.length === 3) {
+            if (noses === 3) {
+              houseHoldType = "Destitute";
+            } else if (yeses === 3) {
+              houseHoldType = "Ready to Grow";
+            } else if (noses >= 1) {
+              houseHoldType = "Struggling";
+            }
+          }
           eventDetails = {
             ...eventDetails,
             [`${parentProgram}.${parentProgramStage}.eventDate`]: eventDate,
-            ...fromPairs(
-              dataValues.map(({ dataElement, value }: any) => [
-                `${parentProgram}.${parentProgramStage}.${dataElement}`,
-                value,
-              ])
-            ),
+            houseHoldType,
           };
         }
         child = {
@@ -728,8 +1091,8 @@ export const processInstances = async (
               value,
             ])
           ),
-          ...eventDetails,
           hasEnrollment: !!enrollmentDate,
+          ...eventDetails,
         };
       }
 
@@ -737,19 +1100,20 @@ export const processInstances = async (
         start: quarterStart,
         end: quarterEnd,
       });
-      // One Year before quarter end
 
+      const heiData = eventsBeforePeriod(allEvents, "KOFm3jJl7n7", quarterEnd);
+      // One Year before quarter end starting octerber
       const riskAssessmentsDuringYear = eventsWithinPeriod(
         allEvents,
         "B9EI27lmQrZ",
-        subYears(quarterEnd, 1),
-        quarterEnd
+        financialQuarterStart,
+        financialQuarterEnd
       );
       const referralsDuringYear = eventsWithinPeriod(
         allEvents,
         "yz3zh5IFEZm",
-        subYears(quarterEnd, 1),
-        quarterEnd
+        financialQuarterStart,
+        financialQuarterEnd
       );
 
       // During Quarter
@@ -789,12 +1153,6 @@ export const processInstances = async (
 
       // Before or during quarter starts
 
-      const referralsBe4Quarter = eventsBeforePeriod(
-        allEvents,
-        "yz3zh5IFEZm",
-        quarterEnd
-      );
-
       const previousReferrals = eventsBeforePeriod(
         allEvents,
         "yz3zh5IFEZm",
@@ -820,7 +1178,6 @@ export const processInstances = async (
 
       const currentRiskAssessment = mostCurrentEvent(riskAssessmentsDuringYear);
       const currentReferral = mostCurrentEvent(referralsDuringYear);
-      const referralThisQuarter = mostCurrentEvent(referralsDuringQuarter);
       const anyViralLoad = mostCurrentEvent(viralLoadsBe4Quarter);
       const hivResult = specificDataElement(currentReferral, "XTdRWh5MqPw");
 
@@ -832,6 +1189,73 @@ export const processInstances = async (
           ? 1
           : 0,
         newlyEnrolled: isWithin ? "Yes" : "No",
+      };
+
+      const ageGroup: any = child["RDEklSXCD4C.N1nMqKtYKvI"];
+      const hVatDate: any = child["HEWq6yr4cs5.enrollmentDate"];
+      const age = differenceInYears(quarterEnd, parseISO(ageGroup));
+
+      if (age <= 2) {
+        const eidEnrollmentDate = findAnyEventValue(heiData, "sDMDb4InL5F");
+        const motherArtNo = findAnyEventValue(heiData, "P6KEPNorRTT");
+        const eidNo = findAnyEventValue(heiData, "Qyp4adG3KJL");
+
+        const dateFirstPCRDone = findAnyEventValue(heiData, "yTSlwP6htQh");
+        const firstPCRResults = findAnyEventValue(heiData, "fUY7DEjsZin");
+
+        const dateSecondPCRDone = findAnyEventValue(heiData, "TJPxuJHRA3P");
+        const secondPCRResults = findAnyEventValue(heiData, "TX2qmTSj0rM");
+
+        const dateThirdPCRDone = findAnyEventValue(heiData, "r0zBP8h3UEl");
+        const thirdPCRResults = findAnyEventValue(heiData, "G0YhL0M4YjJ");
+
+        const hivTestDueDate = findAnyEventValue(heiData, "CWqTgshbDbW");
+        const dateHivTestDone = findAnyEventValue(heiData, "qitG6coAg3q");
+        const hivTestResults = findAnyEventValue(heiData, "lznDPbUscke");
+        const finalOutcome = findAnyEventValue(heiData, "fcAZR5zt9i3");
+
+        const pcr = !!hivTestResults
+          ? "4"
+          : !!thirdPCRResults
+          ? "3"
+          : !!secondPCRResults
+          ? "2"
+          : !!firstPCRResults
+          ? "1"
+          : "";
+
+        child = {
+          ...child,
+          eidEnrollmentDate,
+          motherArtNo,
+          eidNo,
+          dateFirstPCRDone,
+          firstPCRResults:
+            firstPCRResults === "1" ? "+" : firstPCRResults === "2" ? "-" : "",
+          dateSecondPCRDone,
+          secondPCRResults:
+            secondPCRResults === "1"
+              ? "+"
+              : secondPCRResults === "2"
+              ? "-"
+              : "",
+          dateThirdPCRDone,
+          thirdPCRResults:
+            thirdPCRResults === "1" ? "+" : thirdPCRResults === "2" ? "-" : "",
+          hivTestDueDate,
+          dateHivTestDone,
+          hivTestResults:
+            hivTestResults === "1" ? "+" : hivTestResults === "2" ? "-" : "",
+          finalOutcome,
+          pcr,
+        };
+      }
+
+      child = {
+        ...child,
+        riskFactor:
+          findAnyEventValue(homeVisitsBe4Quarter, "rQBaynepqjy") ||
+          child[`RDEklSXCD4C.nDUbdM2FjyP`],
       };
 
       if (viralLoadsBe4Quarter.length > 0) {
@@ -848,6 +1272,16 @@ export const processInstances = async (
               : hivResult === "Negative"
               ? "-"
               : "",
+        };
+      } else if (!!child.hivTestResults) {
+        child = {
+          ...child,
+          hivStatus: child.hivTestResults,
+        };
+      } else if (child.riskFactor === "HEI") {
+        child = {
+          ...child,
+          hivStatus: "DK",
         };
       } else {
         child = {
@@ -879,14 +1313,45 @@ export const processInstances = async (
         "false"
       );
 
+      const tbScreeningChild = checkRiskAssessment(currentRiskAssessment, [
+        "DgCXKSDPTWn",
+        "Rs5qrKay7Gq",
+        "QEm2B8LZtzd",
+        "X9n17I5Ibdf",
+      ]);
+      const tbScreeningChild17 = checkRiskAssessment(currentRiskAssessment, [
+        "DgCXKSDPTWn",
+        "Rs5qrKay7Gq",
+        "QEm2B8LZtzd",
+        "X9n17I5Ibdf",
+        "Oi6CUuucUCP",
+      ]);
+      const tbScreeningAdult = checkRiskAssessment(currentRiskAssessment, [
+        "If8hDeux5XE",
+        "ha2nnIeFgbu",
+        "NMtrXN3NBqY",
+        "Oi6CUuucUCP",
+      ]);
+
       const atTBRiskChild = checkRiskAssessment(
         currentRiskAssessment,
         ["DgCXKSDPTWn", "Rs5qrKay7Gq", "QEm2B8LZtzd", "X9n17I5Ibdf"],
         "true"
       );
+      const atTBRiskChild17 = checkRiskAssessment(
+        currentRiskAssessment,
+        [
+          "DgCXKSDPTWn",
+          "Rs5qrKay7Gq",
+          "QEm2B8LZtzd",
+          "X9n17I5Ibdf",
+          "Oi6CUuucUCP",
+        ],
+        "true"
+      );
       const atTBRiskAdult = checkRiskAssessment(
         currentRiskAssessment,
-        ["If8hDeux5XE", "ha2nnIeFgbu", "NMtrXN3NBqY"],
+        ["If8hDeux5XE", "ha2nnIeFgbu", "NMtrXN3NBqY", "Oi6CUuucUCP"],
         "true"
       );
 
@@ -908,14 +1373,6 @@ export const processInstances = async (
         currentReferral,
         "XWudTD2LTUQ"
       );
-      const serviceProvidedThisQuarter = specificDataElement(
-        referralsDuringYear,
-        "XWudTD2LTUQ"
-      );
-      const serviceProvidedThisYear = specificDataElement(
-        referralThisQuarter,
-        "XWudTD2LTUQ"
-      );
       const unknownOther = findAnyEventValue(
         riskAssessmentsDuringYear,
         "cTV8aMqnVbe"
@@ -923,7 +1380,7 @@ export const processInstances = async (
 
       child = {
         ...child,
-        linked: deHasAnyValue(serviceProvidedThisQuarter, [
+        linked: deHasAnyValue(serviceProvided, [
           "Started HIV treatment",
           "PEP",
           "HCT/ Tested for HIV",
@@ -933,7 +1390,7 @@ export const processInstances = async (
         ]),
       };
 
-      if (serviceProvidedThisQuarter === "HCT/ Tested for HIV") {
+      if (serviceProvided === "HCT/ Tested for HIV") {
         child = { ...child, testedForHIV: 1 };
       } else {
         child = { ...child, testedForHIV: 0 };
@@ -944,14 +1401,12 @@ export const processInstances = async (
       } else {
         child = { ...child, primaryCareGiver: "0" };
       }
-      const ageGroup: any = child["RDEklSXCD4C.N1nMqKtYKvI"];
-      const hVatDate: any = child["HEWq6yr4cs5.enrollmentDate"];
-      const age = differenceInYears(quarterEnd, parseISO(ageGroup));
+
       if (ageGroup && ageGroup.length === 10) {
         child = { ...child, [`RDEklSXCD4C.ageGroup`]: findAgeGroup(age) };
       }
       if (ageGroup && ageGroup.length === 10) {
-        child = { ...child, [`RDEklSXCD4C.age`]: age };
+        child = { ...child, [`RDEklSXCD4C.age`]: Number(age).toString() };
       }
       if (
         isWithinInterval(parseISO(hVatDate), {
@@ -984,23 +1439,10 @@ export const processInstances = async (
         child = { ...child, OVC_TST_REPORT: 0 };
       }
 
-      // if (age < 18 && testedForHIV) {
-      //   child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 1 };
-      // } else {
-      //   child = { ...child, [`RDEklSXCD4C.B9EI27lmQrZ.testedForHIV`]: 0 };
-      // }
-
       if (child.hivStatus === "+" && age < 18) {
         child = {
           ...child,
           riskFactor: "CLHIV",
-        };
-      } else {
-        child = {
-          ...child,
-          riskFactor:
-            findAnyEventValue(homeVisitsBe4Quarter, "rQBaynepqjy") ||
-            child[`RDEklSXCD4C.nDUbdM2FjyP`],
         };
       }
 
@@ -1033,21 +1475,19 @@ export const processInstances = async (
         ),
       };
 
-      // const hivStatusReferral = findAnyEventValue(
-      //   referralsBe4Quarter,
-      //   "PpUByWk3p8N"
-      // );
-      // const hivStatusRiskAssessment = findAnyEventValue(
-      //   riskAssessmentsBe4Quarter,
-      //   "vBqh2aiuHOV"
-      // );
-      // const hivStatusVL = findAnyEventValue(
-      //   viralLoadsBe4Quarter,
-      //   "PpUByWk3p8N"
-      // );
       const homeVisitor = findAnyEventValue(
         homeVisitsBe4Quarter,
         "i6XGAmzx3Ri"
+      );
+      const dataEntrant = findAnyEventValue(
+        homeVisitsDuringQuarter,
+        "YY5zG4Bh898"
+      );
+      const dataEntrant1 = child["HEWq6yr4cs5.Xkwy5P2JG24"];
+
+      const dataEntrant2 = findAnyEventValue(
+        viralLoadDuringQuarter,
+        "YY5zG4Bh898"
       );
       const homeVisitorContact = findAnyEventValue(
         homeVisitsBe4Quarter,
@@ -1061,6 +1501,7 @@ export const processInstances = async (
         facility: "",
         artNo: "",
         homeVisitorContact,
+        dataEntrant: dataEntrant || dataEntrant1 || dataEntrant2,
       };
 
       if (
@@ -1140,7 +1581,8 @@ export const processInstances = async (
         viralLoadsBe4Quarter,
         "b8p0uWaYRhY"
       );
-      const copies = findAnyEventValue(viralLoadsBe4Quarter, "dKuvKdHH5BP");
+      const regimen = findAnyEventValue(viralLoadsBe4Quarter, "nZ1omFVYFkT");
+      const weight = findAnyEventValue(viralLoadsBe4Quarter, "Kjtt7SV26zL");
       if (child["hivStatus"] === "+") {
         if (!!artStartDate) {
           const daysOnArt = differenceInMonths(
@@ -1259,22 +1701,23 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        fLiteracy:
-          hadASession(
-            rows,
-            participantIndex,
-            sessionNameIndex,
-            sessionDateIndex,
-            child["RDEklSXCD4C.HLKc2AKR9jW"],
-            quarterStart,
-            quarterEnd,
-            sessions["Financial Literacy"]
-          ) ||
-          (anyEventWithDE(homeVisitsDuringQuarter, "PBiFAeCVnot") &&
-            age >= 10) ||
-          ((anyEventWithDE(homeVisitsDuringQuarter, "Xlw16qiDxqk") ||
+        fLiteracy: hadASession(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
+          quarterEnd,
+          sessions["Financial Literacy"]
+        )
+          ? 1
+          : 0,
+        fHomeBasedLiteracy:
+          (anyEventWithDE(homeVisitsDuringQuarter, "PBiFAeCVnot") ||
+            anyEventWithDE(homeVisitsDuringQuarter, "Xlw16qiDxqk") ||
             anyEventWithDE(homeVisitsDuringQuarter, "rOTbGzSfKbs")) &&
-            age >= 15)
+          age >= 15
             ? 1
             : 0,
       };
@@ -1448,7 +1891,7 @@ export const processInstances = async (
             : 0,
       };
       if (
-        deHasAnyValue(serviceProvidedThisQuarter, [
+        deHasAnyValue(serviceProvided, [
           "Started HIV treatment",
           "PEP",
           "HCT/ Tested for HIV",
@@ -1485,7 +1928,7 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        homeDrugDelivery: deHasAnyValue(serviceProvidedThisQuarter, [
+        homeDrugDelivery: deHasAnyValue(serviceProvided, [
           "Home drug delivery",
         ]),
       };
@@ -1724,12 +2167,22 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        tbScreening: atTBRiskChild >= 4 || atTBRiskAdult >= 4 ? 1 : 0,
+        tbScreening:
+          (tbScreeningChild === 4 && age < 16) ||
+          (tbScreeningAdult === 4 && age > 17) ||
+          (tbScreeningChild17 === 4 && age >= 16)
+            ? 1
+            : 0,
       };
 
       child = {
         ...child,
-        atRiskOfTB: atTBRiskChild >= 5 || atTBRiskAdult >= 5 ? 1 : 0,
+        atRiskOfTB:
+          (atTBRiskChild >= 5 && age < 16) ||
+          (atTBRiskAdult >= 5 && age > 17) ||
+          (atTBRiskChild17 >= 5 && age >= 16)
+            ? 1
+            : 0,
       };
 
       child = {
@@ -1788,15 +2241,32 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        parenting: hasCompleted(
+        parenting: hasCompletedWithin(
           rows,
           participantIndex,
           sessionNameIndex,
           sessionDateIndex,
           child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
           quarterEnd,
           sessions["SINOVUYO"],
           mapping2["SINOVUYO"]
+        )
+          ? 1
+          : 0,
+      };
+
+      child = {
+        ...child,
+        parentingAttended: hadASession(
+          rows,
+          participantIndex,
+          sessionNameIndex,
+          sessionDateIndex,
+          child["RDEklSXCD4C.HLKc2AKR9jW"],
+          quarterStart,
+          quarterEnd,
+          sessions["SINOVUYO"]
         )
           ? 1
           : 0,
@@ -1824,13 +2294,13 @@ export const processInstances = async (
       };
       child = {
         ...child,
-        nutritionalFoodSupplement: deHasAnyValue(serviceProvidedThisQuarter, [
+        nutritionalFoodSupplement: deHasAnyValue(serviceProvided, [
           "Food supplement",
         ]),
       };
       child = {
         ...child,
-        nutritionalAssessment: deHasAnyValue(serviceProvidedThisQuarter, [
+        nutritionalAssessment: deHasAnyValue(serviceProvided, [
           "Nutritional assessment",
         ]),
       };
@@ -1905,6 +2375,7 @@ export const processInstances = async (
       const coreES =
         child.VSLA === 1 ||
         child.fLiteracy === 1 ||
+        child.fHomeBasedLiteracy === 1 ||
         child.bankLinkages === 1 ||
         child.agriBusiness === 1 ||
         child.spmTraining === 1 ||
@@ -1950,7 +2421,7 @@ export const processInstances = async (
         child.TFGBV === 1 ||
         child.referral4LegalSupport === 1 ||
         child.ECD === 1 ||
-        child.parenting === 1 ||
+        child.parentingAttended === 1 ||
         child.childProtectionEducation === 1;
 
       const coreNutrition =
@@ -1986,8 +2457,17 @@ export const processInstances = async (
       } else {
         child = {
           ...child,
-          quarter: 0,
+          quarter: "0",
         };
+      }
+
+      if (
+        previousData[trackedEntityInstance] &&
+        previousData[trackedEntityInstance].quarter === 1
+      ) {
+        child = { ...child, servedInPreviousQuarter: 1 };
+      } else {
+        child = { ...child, servedInPreviousQuarter: "0" };
       }
 
       if (child.newlyEnrolled === "Yes" && child.quarter === 1) {
@@ -1995,7 +2475,7 @@ export const processInstances = async (
           ...child,
           OVC_SERV: 1,
         };
-      } else if (child.quarter === 1) {
+      } else if (child.quarter === 1 && child.servedInPreviousQuarter === 1) {
         child = {
           ...child,
           OVC_SERV: 1,
@@ -2003,7 +2483,7 @@ export const processInstances = async (
       } else {
         child = {
           ...child,
-          OVC_SERV: 0,
+          OVC_SERV: "0",
         };
       }
 
@@ -2022,7 +2502,7 @@ export const processInstances = async (
       if (age < 18 && child.OVC_SERV === 1) {
         child = {
           ...child,
-          OVC_SERV_SUBPOP: child.riskFactor,
+          OVC_SERV_SUBPOP: risks[child.riskFactor] || child.riskFactor,
         };
       }
 
@@ -2081,7 +2561,16 @@ export const processInstances = async (
         child.hivStatus !== "-" &&
         child.isNotAtRisk !== 1
       ) {
-        if (!!unknownOther) {
+        if (
+          child.riskFactor === "HEI" &&
+          child.hivStatus === "DK" &&
+          age <= 2
+        ) {
+          child = {
+            ...child,
+            unknown: "HEI",
+          };
+        } else if (!!unknownOther) {
           child = {
             ...child,
             unknown: unknownOther,
@@ -2115,8 +2604,8 @@ export const processInstances = async (
         child.newlyPositive &&
         !!artStartDate &&
         isWithinInterval(parseISO(artStartDate), {
-          start: subYears(quarterEnd, 1),
-          end: quarterEnd,
+          start: financialQuarterStart,
+          end: financialQuarterEnd,
         })
       ) {
         child = { ...child, newlyTestedPositive: 1 };
@@ -2144,21 +2633,110 @@ export const processInstances = async (
         currentArtStartDate &&
         child.onArt &&
         isWithinInterval(parseISO(currentArtStartDate), {
-          start: subYears(quarterEnd, 1),
-          end: quarterEnd,
+          start: financialQuarterStart,
+          end: financialQuarterEnd,
         })
       ) {
         child = {
           ...child,
           newlyTestedAndOnArt: 1,
         };
-      } else if (serviceProvidedThisQuarter === "Started HIV treatment") {
+      } else if (serviceProvided === "Started HIV treatment") {
         child = { ...child, newlyTestedAndOnArt: 1 };
       }
-      return child;
+
+      child = { ...child, currentRegimen: regimen, weight };
+
+      if (
+        child.memberStatus === "Active" &&
+        child.OVC_SERV === "0" &&
+        child.servedInPreviousQuarter === "0" &&
+        child.quarter === "0" &&
+        child.newlyEnrolled === "No"
+      ) {
+        child = { ...child, exitedWithGraduation: "Not served in both qtrs" };
+      } else if (
+        child.OVC_SERV === "0" &&
+        child.quarter === "0" &&
+        child.memberStatus === "Active"
+      ) {
+        child = { ...child, exitedWithGraduation: "Not served current qtr" };
+      } else if (
+        child.OVC_SERV === "0" &&
+        child.servedInPreviousQuarter === "0" &&
+        child.memberStatus === "Active"
+      ) {
+        child = { ...child, exitedWithGraduation: "Not served previous qtr" };
+      } else if (
+        child.OVC_SERV === "0" &&
+        child.memberStatus === "No Home Visit"
+      ) {
+        child = { ...child, exitedWithGraduation: "Not served in both qtrs" };
+      } else if (child.OVC_SERV === "0") {
+        child = { ...child, exitedWithGraduation: child.memberStatus };
+      }
+      return [trackedEntityInstance, child];
     }
   );
-  return instances;
+  return fromPairs(instances);
+};
+
+export const useComprehensiveProgramStage = (
+  organisationUnits: string[],
+  period: [Date, Date],
+  sessions: { [key: string]: string[] },
+  page: number,
+  pageSize: number
+) => {
+  const engine = useDataEngine();
+  return useQuery<any, Error>(
+    [
+      "trackedEntityInstances-comp",
+      ...organisationUnits,
+      ...period,
+      page,
+      pageSize,
+    ],
+    async () => {
+      if (organisationUnits.length > 0) {
+        const query = {
+          instances: {
+            resource: "trackedEntityInstances.json",
+            params: {
+              fields: "*",
+              ou: organisationUnits.join(";"),
+              ouMode: "DESCENDANTS",
+              filter: `mWyp85xIzXR:IN:${[
+                "SINOVUYO",
+                "ECD",
+                "Saving and Borrowing",
+                "SPM Training",
+                "Financial Literacy",
+                "VSLA Methodology",
+              ].join(";")}`,
+              page,
+              pageSize,
+              program: "IXxHJADVCkb",
+              totalPages: true,
+            },
+          },
+        };
+        const {
+          instances: { trackedEntityInstances, pager },
+        }: any = await engine.query(query);
+        const { total } = pager;
+        changeTotal(total);
+        return await processPrevention(
+          engine,
+          trackedEntityInstances,
+          sessions,
+          period
+        );
+      }
+      changeTotal(0);
+      return [];
+    }
+  );
 };
 
 export const useProgramStage = (
@@ -2185,6 +2763,7 @@ export const useProgramStage = (
                 "MOH Journeys curriculum",
                 "No means No sessions (Boys)",
                 "No means No sessions (Girls)",
+                "No means No sessions (Boys) New Curriculum",
               ].join(";")}`,
               page,
               pageSize,
@@ -2216,7 +2795,8 @@ export const useTracker = (
   sessions: { [a: string]: string[] },
   period: any,
   page: number,
-  pageSize: number
+  pageSize: number,
+  code: string
 ) => {
   const engine = useDataEngine();
   return useQuery<any, Error>(
@@ -2227,22 +2807,28 @@ export const useTracker = (
       period,
       page,
       pageSize,
+      code,
     ],
     async () => {
       if (program && organisationUnits.length > 0 && period) {
+        let filter = `HLKc2AKR9jW:NE:""`;
+        if (code) {
+          filter = `HLKc2AKR9jW:EQ:${code}`;
+        }
+        let params = {
+          fields: "*",
+          ou: organisationUnits.join(";"),
+          ouMode: "DESCENDANTS",
+          filter,
+          page,
+          pageSize,
+          program: "RDEklSXCD4C",
+          totalPages: true,
+        };
         const query = {
           instances: {
             resource: "trackedEntityInstances.json",
-            params: {
-              fields: "*",
-              ou: organisationUnits.join(";"),
-              ouMode: "DESCENDANTS",
-              filter: `HLKc2AKR9jW:NE:""`,
-              page,
-              pageSize,
-              program: "RDEklSXCD4C",
-              totalPages: true,
-            },
+            params,
           },
         };
         const {
@@ -2250,20 +2836,3364 @@ export const useTracker = (
         }: any = await engine.query(query);
         const { total } = pager;
         changeTotal(total);
-        return await processInstances(
+
+        const filteredInstances = trackedEntityInstances.filter(
+          (instance: any) =>
+            instance.inactive === false && instance.deleted === false
+        );
+
+        const indexCases = await fetchRelationships4Instances(
           engine,
+          filteredInstances,
+          organisationUnits.join(";")
+        );
+        const processedUnits = await fetchUnits4Instances(
+          engine,
+          filteredInstances
+        );
+        const groupActivities = await fetchGroupActivities4Instances(
+          engine,
+          filteredInstances,
+          organisationUnits.join(";")
+        );
+        const servedPreviousQuarter = processInstances(
           program,
-          trackedEntityInstances.filter(
-            (instance: any) =>
-              instance.inactive === false && instance.deleted === false
-          ),
+          filteredInstances,
+          moment(period).subtract(1, "quarter"),
+          sessions,
+          indexCases,
+          processedUnits,
+          {
+            rows: [],
+            sessionNameIndex: 1,
+            participantIndex: 2,
+            sessionDateIndex: 3,
+          },
+          {}
+        );
+        return processInstances(
+          program,
+          filteredInstances,
           period,
-          organisationUnits.join(";"),
-          sessions
+          sessions,
+          indexCases,
+          processedUnits,
+          groupActivities,
+          servedPreviousQuarter
         );
       }
       changeTotal(0);
-      return [];
+      return {};
     }
   );
+};
+
+export const useLayering = (query: { [key: string]: any }) => {
+  return useQuery<any, Error>(
+    [Buffer.from(JSON.stringify(query)).toString("base64")],
+    async () => {
+      const {
+        data: { columns, rows, cursor },
+      } = await api.post("sql", query);
+
+      if (columns) {
+        realColumns = columns;
+      }
+      return {
+        cursor,
+        data: rows.map((r: any) => {
+          return fromPairs(
+            realColumns.map((c: any, i: number) => [c.name, r[i]])
+          );
+        }),
+      };
+    }
+  );
+};
+
+export const useLayering2 = (query: { [key: string]: any }) => {
+  return useQuery<any, Error>(
+    [Buffer.from(JSON.stringify(query)).toString("base64")],
+    async () => {
+      const {
+        data: { columns, rows, cursor },
+      } = await api.post("sql", query);
+
+      if (columns) {
+        realColumns = columns;
+      }
+      return {
+        cursor,
+        data: rows.map((r: any) => {
+          return fromPairs(
+            realColumns.map((c: any, i: number) => [c.name, r[i]])
+          );
+        }),
+      };
+    }
+  );
+};
+
+export const useOVCHMIS = (districts: Option[], period: any) => {
+  return useQuery<any, Error>(
+    ["ovc-hmis", ...districts.map((d) => d.value), period],
+    async () => {
+      if (districts.length > 0 && period) {
+        let must: any[] = [
+          {
+            match: {
+              "qtr.keyword": period.format("YYYY[Q]Q"),
+            },
+          },
+          { terms: { "level3.keyword": districts.map((d) => d.value) } },
+        ];
+
+        let queries = [
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { coreES: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(nonFormalEducation) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,COUNT(*) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: {
+                            micro: 1,
+                          },
+                        },
+                        {
+                          term: {
+                            igaBooster: 1,
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { agriBusiness: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: { VSLA: 1 },
+                        },
+                        {
+                          term: { tempConsumption: 1 },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(coreNutrition) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { agriBusiness: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,0 total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(coreHealth) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(treatedNets) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,0 total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,COUNT(*) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: { vlsaOvcFund: 1 },
+                        },
+                        {
+                          term: { educationFund: 1 },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(corePSS) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(tempConsumption) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,sum(GBVPreventionEducation) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,count(*) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: { "hivStatus.keyword": "+" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,0 total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "newlyEnrolled.keyword": "Yes" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by level4`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "newlyEnrolled.keyword": "Yes" },
+                  },
+                  {
+                    term: { OVC_SERV: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+
+          api.post("sql", {
+            query: `select level4,CfpoFtRmK1z,count(*) total from layering group by level4,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: { "newlyEnrolled.keyword": "Yes" },
+                  },
+                ],
+              },
+            },
+          }),
+
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { OVC_SERV: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { fullyGraduated: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "newlyEnrolled.keyword": "Yes" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: { linked: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: { testedForHIV: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  // {
+                  //   range: {
+                  //     age: {
+                  //       lte: 17,
+                  //     },
+                  //   },
+                  // },
+                  {
+                    term: { newlyTestedPositive: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  // {
+                  //   range: {
+                  //     age: {
+                  //       lte: 17,
+                  //     },
+                  //   },
+                  // },
+                  {
+                    term: { newlyTestedAndOnArt: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { newlyTestedAndOnArt: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "hivStatus.keyword": "-" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "unknown.keyword": "Test not required" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    terms: {
+                      "unknown.keyword": [
+                        "Other reasons",
+                        "nknown care giver refuses to disclose ",
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: { linked: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "hivStatus.keyword": "+" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { onArt: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { VLTestDone: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { ovcVL: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "VLStatus.keyword": "Suppressed" },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { eMTCT: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,0 total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,0 total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          api.post("sql", {
+            query: `select level4,ageGroup,CfpoFtRmK1z,count(*) total from layering group by level4,ageGroup,CfpoFtRmK1z`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: { journeysMOH: 1 },
+                        },
+                        {
+                          term: { hivPrevention: 1 },
+                        },
+                        {
+                          term: { NMNBoys: 1 },
+                        },
+                        {
+                          term: { NMNGirls: 1 },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        ];
+
+        const resonse = await Promise.all(queries);
+        let processed: { [key: string]: any } = {};
+        resonse.forEach(({ data: { rows } }, index) => {
+          processed = {
+            ...processed,
+            ...processRows(`ind${index + 1}`, rows),
+            ...getTotal(`ind${index + 1}`, rows),
+          };
+        });
+        return processed;
+      }
+      return {};
+    }
+  );
+};
+
+export const useIndicatorReport = (
+  districts: DistrictOption[],
+  period: any
+) => {
+  const engine = useDataEngine();
+  return useQuery<any, Error>(
+    ["indicator-report", ...districts.map((d) => d.value), period],
+    async () => {
+      if (districts.length > 0 && period) {
+        const year = period.year();
+        const quarters = [
+          `${year - 1}Q4`,
+          `${year}Q1`,
+          `${year}Q2`,
+          `${year}Q3`,
+        ];
+        let must: any[] = [
+          {
+            terms: {
+              "qtr.keyword": quarters,
+            },
+          },
+          { terms: { "level3.keyword": districts.map((d) => d.value) } },
+        ];
+
+        let realQueries: any[] = [];
+        let realKeys: string[] = [];
+
+        const queries = {
+          // Prevension
+          "actG06XnwYXVPu.uBYxpV8iADb": api.post("sql", {
+            query: `select qtr,COUNT(*) total from "layering2" group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: prevConditions,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          // COMP
+          "actG06XnwYXVPu.EVrTtYEJfeN": api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [...must],
+              },
+            },
+          }),
+          //Prev Female
+
+          prevFemale: api.post("sql", {
+            query: `select qtr,COUNT(*) total from "layering2" group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "ZUKC6mck81A.keyword": "Female",
+                    },
+                  },
+                  {
+                    bool: {
+                      should: prevConditions,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          //Prev Male
+          prevMale: api.post("sql", {
+            query: `select qtr,COUNT(*) total from "layering2" group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "ZUKC6mck81A.keyword": "Male",
+                    },
+                  },
+                  {
+                    bool: {
+                      should: prevConditions,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          // COMP Female
+
+          compFemale: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          // COMP Male
+          compMale: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          // OVC_SERV_SUBPOP
+          actSUBPOP: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    terms: {
+                      "OVC_SERV_SUBPOP.keyword": [
+                        "HEI",
+                        "Survivor of SVAC (0-17 Yrs)",
+                        "CLHIV",
+                        "Child of FSW (0-17 Yrs)",
+                        "Child of HIV+ Caregiver",
+                        "Child of Non suppressed HIV+ Caregiver",
+                        "Adolescent/ Teenage Mother",
+                        "Child of Teenage Mother",
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          tarSUBPOP: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          tarSvwnCeMVs2x: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          tarxjo40XN55fN: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        gt: 17,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actSvwnCeMVs2x: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    bool: {
+                      should: [
+                        {
+                          bool: {
+                            must: [
+                              {
+                                term: {
+                                  isNotAtRisk: 1,
+                                },
+                              },
+                              {
+                                term: {
+                                  "hivStatus.keyword": "DK",
+                                },
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          terms: {
+                            "hivStatus.keyword": ["+", "-"],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actxjo40XN55fN: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        gte: 18,
+                      },
+                    },
+                  },
+                  {
+                    bool: {
+                      should: [
+                        {
+                          bool: {
+                            must: [
+                              {
+                                term: {
+                                  isNotAtRisk: 1,
+                                },
+                              },
+                              {
+                                term: {
+                                  "hivStatus.keyword": "DK",
+                                },
+                              },
+                            ],
+                          },
+                        },
+                        {
+                          terms: {
+                            "hivStatus.keyword": ["+", "-"],
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actfunl4ILuJBgF: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "DK",
+                    },
+                  },
+                  {
+                    term: {
+                      isNotAtRisk: 0,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actheiF: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "DK",
+                    },
+                  },
+                  {
+                    term: {
+                      isNotAtRisk: 0,
+                    },
+                  },
+                  {
+                    term: {
+                      "riskFactor.keyword": "HEI",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actfunl4ILuJBgM: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "DK",
+                    },
+                  },
+                  {
+                    term: {
+                      isNotAtRisk: 0,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actheiM: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "DK",
+                    },
+                  },
+                  {
+                    term: {
+                      isNotAtRisk: 0,
+                    },
+                  },
+                  {
+                    term: {
+                      "riskFactor.keyword": "HEI",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actke1VrRuiMARF: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      "riskAssessment.keyword": "1",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actke1VrRuiMARM: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      "riskAssessment.keyword": "1",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actzu7vuVccd5aF: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      "isAtRisk.keyword": "1",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actzu7vuVccd5aM: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      "isAtRisk.keyword": "1",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actbvDkc94MhA3F: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_TST_REFER: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actbvDkc94MhA3M: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_TST_REFER: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actDVgzq5RZugIF: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_TST_REFER: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actDVgzq5RZugIM: api.post("sql", {
+            query: `select qtr,SUM(OVC_SERV) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_TST_REFER: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actRvF3up57r29: api.post("sql", {
+            query: `select qtr,SUM(OVC_ENROL) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actwTcbcrds2w6F: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actwTcbcrds2w6M: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actwTcbcrds2w6.dHzqsjLPXzb": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actwTcbcrds2w6.VCmHfkJVEDp": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    range: {
+                      age: {
+                        gte: 18,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          tarwTcbcrds2w6F: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          tarwTcbcrds2w6M: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "tarwTcbcrds2w6.dHzqsjLPXzb": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "tarwTcbcrds2w6.VCmHfkJVEDp": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    range: {
+                      age: {
+                        gte: 18,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actMslqTqo0kdzF: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actMslqTqo0kdzM: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actMslqTqo0kdz.dHzqsjLPXzb": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actMslqTqo0kdz.VCmHfkJVEDp": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+                  {
+                    range: {
+                      age: {
+                        gte: 18,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+
+          actjCwcGbjVD8GF: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  // {
+                  //   range: {
+                  //     age: {
+                  //       lte: 17,
+                  //     },
+                  //   },
+                  // },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "VLStatus.keyword": "Suppressed",
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Female",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actjCwcGbjVD8GM: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+
+                  // {
+                  //   range: {
+                  //     age: {
+                  //       lte: 17,
+                  //     },
+                  //   },
+                  // },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "VLStatus.keyword": "Suppressed",
+                    },
+                  },
+                  {
+                    term: {
+                      "CfpoFtRmK1z.keyword": "Male",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actjCwcGbjVD8G.dHzqsjLPXzb": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        lte: 17,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "VLStatus.keyword": "Suppressed",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          "actjCwcGbjVD8G.VCmHfkJVEDp": api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    range: {
+                      age: {
+                        gte: 18,
+                      },
+                    },
+                  },
+                  {
+                    term: {
+                      "hivStatus.keyword": "+",
+                    },
+                  },
+                  {
+                    term: {
+                      OVC_SERV: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "ovcEligible.keyword": "1",
+                    },
+                  },
+                  {
+                    term: {
+                      onArt: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      VLTestDone: 1,
+                    },
+                  },
+                  {
+                    term: {
+                      ovcVL: 1,
+                    },
+                  },
+
+                  {
+                    term: {
+                      "VLStatus.keyword": "Suppressed",
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actd7fhsyxUiCzF: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: {
+                            GBVPreventionEducation: 1,
+                          },
+                        },
+                        {
+                          term: {
+                            TFGBV: 1,
+                          },
+                        },
+                        {
+                          term: {
+                            "CfpoFtRmK1z.keyword": "Female",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          actd7fhsyxUiCzM: api.post("sql", {
+            query: `select qtr,COUNT(*) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    bool: {
+                      should: [
+                        {
+                          term: {
+                            GBVPreventionEducation: 1,
+                          },
+                        },
+                        {
+                          term: {
+                            TFGBV: 1,
+                          },
+                        },
+                        {
+                          term: {
+                            "CfpoFtRmK1z.keyword": "Male",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          tarB5yBgVUt7ij: api.post("sql", {
+            query: `select qtr,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "householdStatus.keyword": "Active" },
+                  },
+                ],
+              },
+            },
+          }),
+          actB5yBgVUt7ij: api.post("sql", {
+            query: `select qtr,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "householdStatus.keyword": "Active" },
+                  },
+                  {
+                    term: { preGraduated: 1 },
+                  },
+                ],
+              },
+            },
+          }),
+          actHqWXHCI6m5y: api.post("sql", {
+            query: `select qtr,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    term: { "assetOwnership.keyword": "Improved" },
+                  },
+                ],
+              },
+            },
+          }),
+          tarHqWXHCI6m5y: api.post("sql", {
+            query: `select qtr,COUNT(DISTINCT tHCT4RKXoiU) total from layering group by qtr`,
+            filter: {
+              bool: {
+                must: [
+                  ...must,
+                  {
+                    terms: {
+                      "assetOwnership.keyword": [
+                        "Improved",
+                        "Stationary",
+                        "Regressed",
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+        };
+
+        Object.entries(queries).forEach(([key, query]) => {
+          realKeys = [...realKeys, key];
+          realQueries = [...realQueries, query];
+        });
+
+        const responses = await Promise.all(realQueries);
+
+        const { rows } = await fetchTargets2(
+          engine,
+          [
+            "d7fhsyxUiCz",
+            "OVC_AGREE_TST",
+            "xGHjuYfbx31",
+            "etKjMrhsGzx",
+            "lnRPzUJNYQN",
+            "RvF3up57r29",
+            // "xjo40XN55fN",
+            // "SvwnCeMVs2x",
+            "funl4ILuJBg",
+            "A4D8wgVl21q",
+            "FR7RCoLtgHT",
+            "G06XnwYXVPu",
+            "G06XnwYXVPu.EVrTtYEJfeN",
+            "G06XnwYXVPu.uBYxpV8iADb",
+            "G06XnwYXVPu.h4tlGMjEc0Y",
+            // "Jao4Bs5Q2FX",
+            "fiOYJ6SPRIG",
+            "ke1VrRuiMAR",
+            "bvDkc94MhA3",
+            "DVgzq5RZugI",
+            "zu7vuVccd5a",
+            "A4VQnLrL5OE",
+            // "wTcbcrds2w6",
+            // "wTcbcrds2w6.VCmHfkJVEDp",
+            // "wTcbcrds2w6.dHzqsjLPXzb",
+            // "MslqTqo0kdz",
+            // "MslqTqo0kdz.VCmHfkJVEDp",
+            // "MslqTqo0kdz.dHzqsjLPXzb",
+            // "jCwcGbjVD8G",
+            // "jCwcGbjVD8G.VCmHfkJVEDp",
+            // "jCwcGbjVD8G.dHzqsjLPXzb",
+            "HaW4jcu0p9U",
+            "B5yBgVUt7ij",
+            // "HqWXHCI6m5y",
+          ],
+          districts.map((d) => d.value),
+          quarters
+        );
+        let processed = processRows("tar", rows);
+
+        realKeys.forEach((queryKey: string, index: number) => {
+          const {
+            data: { rows },
+          } = responses[index];
+          processed = {
+            ...processed,
+            ...processRows(queryKey, rows),
+          };
+        });
+
+        quarters.forEach((q) => {
+          const prev = processed[`actG06XnwYXVPu.uBYxpV8iADb${q}`] || 0;
+          const comprehensive =
+            processed[`actG06XnwYXVPu.EVrTtYEJfeN${q}`] || 0;
+
+          const prevMale = processed[`prevMale${q}`] || 0;
+          const comprehensiveMale = processed[`compMale${q}`] || 0;
+
+          const prevFemale = processed[`prevFemale${q}`] || 0;
+          const comprehensiveFemale = processed[`compFemale${q}`] || 0;
+
+          processed = {
+            ...processed,
+            [`actG06XnwYXVPu${q}`]: prev + comprehensive,
+            [`actG06XnwYXVPuF${q}`]: prevFemale + comprehensiveFemale,
+            [`actG06XnwYXVPuM${q}`]: prevMale + comprehensiveMale,
+            [`actfunl4ILuJBg${q}`]:
+              (processed[`actfunl4ILuJBgF${q}`] || 0) +
+              (processed[`actfunl4ILuJBgM${q}`] || 0),
+            [`actke1VrRuiMAR${q}`]:
+              (processed[`actke1VrRuiMARF${q}`] || 0) +
+              (processed[`actke1VrRuiMARM${q}`] || 0),
+            [`actzu7vuVccd5a${q}`]:
+              (processed[`actzu7vuVccd5aF${q}`] || 0) +
+              (processed[`actzu7vuVccd5aM${q}`] || 0),
+            [`actbvDkc94MhA3${q}`]:
+              (processed[`actbvDkc94MhA3F${q}`] || 0) +
+              (processed[`actbvDkc94MhA3M${q}`] || 0),
+            [`actDVgzq5RZugI${q}`]:
+              (processed[`actDVgzq5RZugIF${q}`] || 0) +
+              (processed[`actDVgzq5RZugIM${q}`] || 0),
+            [`tarG06XnwYXVPuF${q}`]: processed[`tarG06XnwYXVPu${q}`]
+              ? processed[`tarG06XnwYXVPu${q}`] / 2
+              : 0,
+            [`tarG06XnwYXVPuM${q}`]: processed[`tarG06XnwYXVPu${q}`]
+              ? processed[`tarG06XnwYXVPu${q}`] / 2
+              : 0,
+          };
+        });
+
+        quarters.forEach((qtr, index) => {
+          [
+            "jCwcGbjVD8G",
+            "MslqTqo0kdz",
+            "wTcbcrds2w6",
+            "d7fhsyxUiCz",
+            "hei",
+          ].forEach((accessor) => {
+            const targetM = processed[`tar${accessor}M${qtr}`] || 0;
+            const actualM = processed[`act${accessor}M${qtr}`] || 0;
+            const targetF = processed[`tar${accessor}F${qtr}`] || 0;
+            const actualF = processed[`act${accessor}F${qtr}`] || 0;
+            processed = {
+              ...processed,
+              [`act${accessor}${qtr}`]: actualM + actualF,
+              [`tar${accessor}${qtr}`]: targetM + targetF,
+            };
+          });
+
+          processed = {
+            ...processed,
+            ...convertIndicators(
+              [
+                "actwTcbcrds2w6F",
+                "actwTcbcrds2w6M",
+                "actwTcbcrds2w6.dHzqsjLPXzb",
+                "actwTcbcrds2w6.VCmHfkJVEDp",
+                "actwTcbcrds2w6",
+              ],
+              [
+                "tarMslqTqo0kdzF",
+                "tarMslqTqo0kdzM",
+                "tarMslqTqo0kdz.dHzqsjLPXzb",
+                "tarMslqTqo0kdz.VCmHfkJVEDp",
+                "tarMslqTqo0kdz",
+              ],
+              quarters,
+              processed
+            ),
+
+            ...convertIndicators(
+              [
+                "actMslqTqo0kdzF",
+                "actMslqTqo0kdzM",
+                "actMslqTqo0kdz.dHzqsjLPXzb",
+                "actMslqTqo0kdz.VCmHfkJVEDp",
+                "actMslqTqo0kdz",
+              ],
+              [
+                "tarjCwcGbjVD8GF",
+                "tarjCwcGbjVD8GM",
+                "tarjCwcGbjVD8G.dHzqsjLPXzb",
+                "tarjCwcGbjVD8G.VCmHfkJVEDp",
+                "tarjCwcGbjVD8G",
+              ],
+              quarters,
+              processed
+            ),
+          };
+
+          [
+            "B5yBgVUt7ij",
+            "d7fhsyxUiCzF",
+            "d7fhsyxUiCzM",
+            "d7fhsyxUiCz",
+            "HqWXHCI6m5y",
+          ].forEach((accessor) => {
+            if (index > 0) {
+              const indexes = times(index);
+
+              let target = processed[`tar${accessor}${qtr}`] || 0;
+              let actual = processed[`act${accessor}${qtr}`] || 0;
+
+              target =
+                target +
+                sum(
+                  indexes.map(
+                    (i: number) =>
+                      processed[`tar${accessor}${quarters[i]}`] || 0
+                  )
+                );
+
+              actual =
+                actual +
+                sum(
+                  indexes.map(
+                    (i: number) =>
+                      processed[`act${accessor}${quarters[i]}`] || 0
+                  )
+                );
+
+              processed = {
+                ...processed,
+                [`act${accessor}${qtr}`]: actual,
+                [`tar${accessor}${qtr}`]: target,
+              };
+            }
+          });
+
+          indicatorReportColumns(period, {}).forEach(
+            ({ columns: [{ accessor }] }) => {
+              if (accessor) {
+                const target = processed[`tar${accessor}${qtr}`] || 0;
+                const actual = processed[`act${accessor}${qtr}`] || 0;
+                if (target !== 0) {
+                  processed = {
+                    ...processed,
+                    [`arc${accessor}${qtr}`]: actual / target,
+                  };
+                }
+              }
+            }
+          );
+        });
+        return processed;
+      }
+      return {};
+    }
+  );
+};
+
+const computeOVCServiceTracker = async (
+  engine: any,
+  period: moment.Moment,
+  districts: any[],
+  level: string
+) => {
+  let must: any[] = [
+    {
+      match: {
+        "qtr.keyword": period.format("YYYY[Q]Q"),
+      },
+    },
+    {
+      terms: {
+        [`level${level}.keyword`]: districts.map((d) => d.value),
+      },
+    },
+  ];
+
+  const must2 = [
+    {
+      match: {
+        "qtr.keyword": moment(period)
+          .subtract(1, "quarters")
+          .format("YYYY[Q]Q"),
+      },
+    },
+    { terms: { [`level${level}.keyword`]: districts.map((d) => d.value) } },
+  ];
+  const queries = [
+    api.post("", {
+      index: "layering",
+      size: 0,
+      query: {
+        bool: {
+          must: [...must],
+        },
+      },
+      aggs: {
+        level: {
+          terms: {
+            field: `level${level}.keyword`,
+            size: 10000,
+          },
+          aggs: {
+            ...ovcTrackerIndicators,
+            age: {
+              terms: {
+                field: "ageGroup.keyword",
+                include: ["< 1", "1 - 4", "5 - 9", "10 - 14", "15 - 17"],
+              },
+              aggs: {
+                ...ovcTrackerIndicators,
+              },
+            },
+          },
+        },
+      },
+    }),
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering2 group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            {
+              term: {
+                "qtr.keyword": period.format("YYYY[Q]Q"),
+              },
+            },
+            {
+              terms: {
+                [`level${level}.keyword`]: districts.map((d) => d.value),
+              },
+            },
+            {
+              bool: {
+                should: [
+                  {
+                    term: {
+                      "Completed MOE Journeys Plus": 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "Completed MOH Journeys": 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "Completed NMN Boys": 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "Completed NMN Girls": 1,
+                    },
+                  },
+                  {
+                    term: {
+                      "Completed NMN Boys New Curriculum": 1,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    }),
+  ];
+  const [
+    {
+      data: {
+        level: { buckets: comprehensive },
+      },
+    },
+    {
+      data: { rows: prevention },
+    },
+    {
+      data: { rows: foundRows },
+    },
+    {
+      data: { rows: childrenRows },
+    },
+    {
+      data: { rows: trackers },
+    },
+    {
+      data: { rows: art },
+    },
+    {
+      data: { rows: eligible },
+    },
+    {
+      data: { rows: vlt },
+    },
+    {
+      data: { rows: vlr },
+    },
+    {
+      data: { rows: vls },
+    },
+    {
+      data: { rows: notServed },
+    },
+    {
+      data: { rows: noVL },
+    },
+    {
+      data: { rows: diff },
+    },
+    {
+      data: { rows: sup },
+    },
+  ] = await Promise.all([
+    ...queries,
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              bool: {
+                must_not: [
+                  {
+                    terms: {
+                      "memberStatus.keyword": [
+                        "Died",
+                        "Relocated",
+                        "Exited at Will",
+                        "Not eligible",
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    }),
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 20,
+                },
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+          ],
+        },
+      },
+    }),
+    //Trackers
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              terms: {
+                "ovcEligible.keyword": ["1", "NE"],
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // CLHIV on ART
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              terms: {
+                "ovcEligible.keyword": ["1", "NE"],
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // Eligible
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "1",
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // VLT
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "1",
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+            {
+              term: {
+                VLTestDone: 1,
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // VLR
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "1",
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+            {
+              term: {
+                VLTestDone: 1,
+              },
+            },
+            {
+              term: {
+                ovcVL: 1,
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // VLS
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "1",
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+            {
+              term: {
+                VLTestDone: 1,
+              },
+            },
+            {
+              term: {
+                ovcVL: 1,
+              },
+            },
+
+            {
+              term: {
+                "VLStatus.keyword": "Suppressed",
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // Not served
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 0,
+              },
+            },
+            {
+              terms: {
+                "ovcEligible.keyword": ["1", "NE", "No VL"],
+              },
+            },
+          ],
+        },
+      },
+    }),
+    // CLHIV served no VL
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "No VL",
+              },
+            },
+          ],
+        },
+      },
+    }),
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must2,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              terms: {
+                "ovcEligible.keyword": ["1", "NE"],
+              },
+            },
+          ],
+        },
+      },
+    }),
+    api.post("sql", {
+      query: `select level${level},COUNT(*) total from layering group by level${level}`,
+      filter: {
+        bool: {
+          must: [
+            ...must,
+            {
+              range: {
+                age: {
+                  lte: 17,
+                },
+              },
+            },
+            {
+              term: {
+                "hivStatus.keyword": "+",
+              },
+            },
+            {
+              term: {
+                OVC_SERV: 1,
+              },
+            },
+            {
+              term: {
+                "ovcEligible.keyword": "1",
+              },
+            },
+            {
+              term: {
+                onArt: 1,
+              },
+            },
+            {
+              term: {
+                VLTestDone: 1,
+              },
+            },
+            {
+              term: {
+                ovcVL: 1,
+              },
+            },
+
+            {
+              term: {
+                "VLStatus.keyword": "Unsuppressed",
+              },
+            },
+          ],
+        },
+      },
+    }),
+  ]);
+  const { rows } = await fetchTargets(
+    engine,
+    [
+      "G06XnwYXVPu.EVrTtYEJfeN",
+      "G06XnwYXVPu.uBYxpV8iADb",
+      "G06XnwYXVPu.h4tlGMjEc0Y",
+      "SvwnCeMVs2x",
+      "xjo40XN55fN",
+    ],
+    districts.map((d) => d.value),
+    [period.format("YYYY[Q]Q")]
+  );
+
+  let processed: { [key: string]: any } = fromPairs(
+    rows.map(([de, ou, value]: any) => [
+      `${de}${ou}`,
+      Number(Number(value).toFixed(0)),
+    ])
+  );
+
+  processed = {
+    ...processed,
+    ...fromPairs(foundRows),
+    ...fromPairs(childrenRows.map(([ou, total]: any) => [`child${ou}`, total])),
+    ...fromPairs(trackers.map(([ou, total]: any) => [`tracker${ou}`, total])),
+    ...fromPairs(art.map(([ou, total]: any) => [`art${ou}`, total])),
+    ...fromPairs(eligible.map(([ou, total]: any) => [`eligible${ou}`, total])),
+    ...fromPairs(vlt.map(([ou, total]: any) => [`vlt${ou}`, total])),
+    ...fromPairs(vlr.map(([ou, total]: any) => [`vlr${ou}`, total])),
+    ...fromPairs(vls.map(([ou, total]: any) => [`vls${ou}`, total])),
+    ...fromPairs(
+      notServed.map(([ou, total]: any) => [`notServed${ou}`, total])
+    ),
+    ...fromPairs(noVL.map(([ou, total]: any) => [`noVL${ou}`, total])),
+    ...fromPairs(diff.map(([ou, total]: any) => [`diff${ou}`, total])),
+    ...fromPairs(sup.map(([ou, total]: any) => [`sup${ou}`, total])),
+    ...fromPairs(prevention.map(([ou, total]: any) => [`PREV${ou}`, total])),
+  };
+  comprehensive.forEach(
+    ({
+      key: ou,
+      age: { buckets },
+      OVC_SERV,
+      servedInPreviousQuarter,
+      quarter,
+    }: any) => {
+      let OVC_SERV_17 = 0;
+      let quarter_17 = 0;
+      let servedInPreviousQuarter_17 = 0;
+      buckets.forEach(({ OVC_SERV, servedInPreviousQuarter, quarter }: any) => {
+        OVC_SERV_17 = OVC_SERV_17 + OVC_SERV.value;
+        quarter_17 = quarter_17 + quarter.value;
+        servedInPreviousQuarter_17 =
+          servedInPreviousQuarter_17 + servedInPreviousQuarter.value;
+      });
+      processed[`OVC_SERV${ou}`] = OVC_SERV.value;
+      processed[`quarter${ou}`] = quarter.value;
+      processed[`servedInPreviousQuarter${ou}`] = servedInPreviousQuarter.value;
+      processed[`OVC_SERV_17${ou}`] = OVC_SERV_17;
+      processed[`quarter_17${ou}`] = quarter_17;
+      processed[`servedInPreviousQuarter_17${ou}`] = quarter.value;
+    }
+  );
+
+  return processed;
+};
+
+export const useOVCServiceTracker = (
+  districts: DistrictOption[],
+  period: any
+) => {
+  const engine = useDataEngine();
+
+  return useQuery<any, Error>(
+    ["ovc-service-tracker", ...districts.map((d) => d.value), period],
+    async () => {
+      if (districts.length > 0 && period) {
+        // prevention.forEach(({ key: ou, completedPrevention }: any) => {
+        //   processed[`PREV${ou}`] = completedPrevention.value;
+        // });
+        let processed = {};
+
+        const divisions = districts.flatMap((d) => {
+          if (
+            kampalaDivisions.map(({ value }) => value).indexOf(d.value) !== -1
+          ) {
+            return d;
+          }
+          return [];
+        });
+        const noneDivisions = districts.flatMap((d) => {
+          if (
+            kampalaDivisions.map(({ value }) => value).indexOf(d.value) === -1
+          ) {
+            return d;
+          }
+          return [];
+        });
+
+        if (noneDivisions.length > 0) {
+          const defaultSettings = await computeOVCServiceTracker(
+            engine,
+            period,
+            districts,
+            "3"
+          );
+
+          processed = { ...processed, ...defaultSettings };
+        }
+        if (divisions.length > 0) {
+          const others = await computeOVCServiceTracker(
+            engine,
+            period,
+            divisions,
+            "4"
+          );
+          processed = { ...processed, ...others };
+        }
+        return processed;
+      }
+      return {};
+    }
+  );
+};
+
+export const useDistricts = () => {
+  const engine = useDataEngine();
+  return useQuery<Option[], Error>("districts", async () => {
+    const {
+      districts: { organisationUnits },
+      subCounties: { organisationUnits: counties },
+    }: any = await engine.query({
+      districts: {
+        resource: "organisationUnits.json",
+        params: {
+          level: 3,
+          paging: "false",
+          fields: "id~rename(value),name~rename(label)",
+        },
+      },
+      subCounties: {
+        resource: "organisationUnits.json",
+        params: {
+          level: 4,
+          paging: "false",
+          fields: "id,name,parent[id,name]",
+        },
+      },
+    });
+    const processedSubCounties = groupBy(
+      counties.map(({ id, name, parent: { id: pId, name: pName } }: any) => {
+        return {
+          id,
+          name,
+          parent: pId,
+          parentName: pName,
+        };
+      }),
+      "parent"
+    );
+    setSubCounties(processedSubCounties);
+    return organisationUnits;
+  });
 };

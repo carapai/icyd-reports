@@ -17,15 +17,13 @@ import {
   Stack,
   Text,
   useDisclosure,
-  Input,
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, TreeSelect } from "antd";
-import { useState } from "react";
 import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
-import { flatten, fromPairs } from "lodash";
+import { flatten } from "lodash";
 import { ChangeEvent, useRef } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
 import XLSX from "xlsx";
@@ -35,10 +33,8 @@ import {
   setSelectedOrgUnits,
   setUserOrgUnits,
   toggleColumns2,
-  changeCode,
 } from "../../store/Events";
 import { processPrevention } from "../../store/Queries";
-import { api } from "../../store/Queries";
 import {
   $columns2,
   $financialQuarter,
@@ -67,10 +63,8 @@ const createQuery = (parent: any) => {
   };
 };
 
-const PreventionLayerFilter = () => {
+const ComprehensiveLayerFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const [code, setCode] = useState<string>("");
-
   const {
     isOpen: modalIsOpen,
     onOpen: modalOnOpen,
@@ -79,8 +73,9 @@ const PreventionLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const filteredColumns = useStore($columns2);
+  const columns = useStore($columns2);
   const isChecked = useStore($isChecked);
+  const period = useStore($financialQuarter);
 
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
@@ -116,104 +111,104 @@ const PreventionLayerFilter = () => {
   };
 
   const download = async () => {
-    let must: any[] = [
-      {
-        term: {
-          ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
+    const query = {
+      instances: {
+        resource: "trackedEntityInstances.json",
+        params: {
+          fields: "*",
+          ou: store.selectedOrgUnits.join(";"),
+          ouMode: "DESCENDANTS",
+          filter: `mWyp85xIzXR:IN:${[
+            "SINOVUYO",
+            "ECD",
+            "Saving and Borrowing",
+            "SPM Training",
+            "Financial Literacy",
+            "VSLA Methodology",
+          ].join(";")}`,
+          page: 1,
+          pageSize: 250,
+          program: "IXxHJADVCkb",
+          totalPages: true,
         },
       },
-      {
-        bool: {
-          should: [
-            {
-              terms: {
-                ["level1.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level2.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level3.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level4.keyword"]: store.selectedOrgUnits,
-              },
-            },
-            {
-              terms: {
-                ["level5.keyword"]: store.selectedOrgUnits,
-              },
-            },
-          ],
-        },
+    };
+
+    const {
+      instances: {
+        trackedEntityInstances,
+        pager: { pageCount },
       },
-    ];
-    if (store.code) {
-      must = [
-        ...must,
-        {
-          match: {
-            ["HLKc2AKR9jW.keyword"]: store.code,
+    }: any = await engine.query(query);
+    const processedData = await processPrevention(
+      engine,
+      trackedEntityInstances.filter((a: any) => a.inactive === false),
+      store.sessions,
+      period
+    );
+    let changedColumnData = processedData.map((d) => {
+      return columns.map((c) => d[c.id] || "");
+    });
+
+    if (pageCount > 1) {
+      for (let page = 2; page <= pageCount; page++) {
+        const newQuery = {
+          instances: {
+            resource: "trackedEntityInstances.json",
+            params: {
+              fields: "*",
+              ou: store.selectedOrgUnits.join(";"),
+              ouMode: "DESCENDANTS",
+              filter: `mWyp85xIzXR:IN:${[
+                "MOE Journeys Plus",
+                "MOH Journeys curriculum",
+                "No means No sessions (Boys)",
+                "No means No sessions (Girls)",
+              ].join(";")}`,
+              page,
+              pageSize: 250,
+              program: "IXxHJADVCkb",
+              totalPages: true,
+            },
           },
-        },
-      ];
-    }
-    let {
-      data: { rows: allRows, columns, cursor: currentCursor },
-    } = await api.post("sql", {
-      query: `select * from layering2`,
-      filter: {
-        bool: {
-          must,
-        },
-      },
-    });
-    let availableRows = allRows.map((r: any) => {
-      return fromPairs(columns.map((c: any, i: number) => [c.name, r[i]]));
-    });
-    if (currentCursor) {
-      do {
-        let {
-          data: { rows, cursor },
-        } = await api.post("sql", { cursor: currentCursor });
-        availableRows = availableRows.concat(
-          rows.map((r: any) => {
-            return fromPairs(
-              columns.map((c: any, i: number) => [c.name, r[i]])
-            );
-          })
+        };
+        const {
+          instances: { trackedEntityInstances },
+        }: any = await engine.query(newQuery);
+        const processedData = await processPrevention(
+          engine,
+          trackedEntityInstances.filter((a: any) => a.inactive === false),
+          store.sessions,
+          period
         );
-        currentCursor = cursor;
-      } while (!!currentCursor);
+        let allData = processedData.map((d) => {
+          return columns.map((c) => d[c.id] || "");
+        });
+        changedColumnData = [...changedColumnData, ...allData];
+      }
     }
 
     let wb = XLSX.utils.book_new();
     wb.Props = {
-      Title: "SheetJS Tutorial",
-      Subject: "Test",
-      Author: "Red Stapler",
+      Title: "Prevention Layering",
+      Subject: "Prevention",
+      Author: "ICYD Uganda",
       CreatedDate: new Date(),
     };
 
     wb.SheetNames.push("Listing");
+
     let ws = XLSX.utils.aoa_to_sheet([
-      filteredColumns.map((c: any) => c.display),
-      ...availableRows.map((r: any) =>
-        filteredColumns.map((c: any) => r[c.id])
-      ),
+      columns.map((c) => c.display),
+      ...changedColumnData,
     ]);
     wb.Sheets["Listing"] = ws;
 
     const wbout = XLSX.write(wb, { bookType: "xlsx", type: "binary" });
+
     saveAs(
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
-      "export.xlsx"
+      "prevention.xlsx"
     );
     modalOnClose();
   };
@@ -246,18 +241,6 @@ const PreventionLayerFilter = () => {
           onChange={(value: any) => changePeriod(value)}
         />
       </Stack>
-
-      <Stack direction="row" alignItems="center">
-        <Text>Code:</Text>
-        <Input
-          value={code}
-          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-            setCode(e.target.value)
-          }
-        />
-      </Stack>
-      <Button onClick={() => changeCode(code)}>Search</Button>
-
       <Spacer />
       <Stack direction="row" spacing={4}>
         <Button
@@ -316,6 +299,7 @@ const PreventionLayerFilter = () => {
                 Choose Columns
               </Checkbox>
             </DrawerHeader>
+
             <DrawerBody>
               <List spacing={3}>
                 {store.columns2.map((c) => (
@@ -339,4 +323,4 @@ const PreventionLayerFilter = () => {
   );
 };
 
-export default PreventionLayerFilter;
+export default ComprehensiveLayerFilter;

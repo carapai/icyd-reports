@@ -22,7 +22,7 @@ const options = {
   onProxyRes,
   changeOrigin: true, // needed for virtual hosted sites
   auth: undefined,
-  logLevel: "debug",
+  logLevel: "info",
 };
 
 // create the proxy (without context)

@@ -25,7 +25,14 @@ export const Navigation = () => {
           onClick={() => changeLink("/group-activity-data-layer")}
           selected={active === "/group-activity-data-layer"}
         >
-          Prevention Layering
+          Prevention Group Activity Layering
+        </Tab>
+        <Tab
+          icon={<IconHome24 />}
+          onClick={() => changeLink("/comprehensive-group-activity-layering")}
+          selected={active === "/comprehensive-group-activity-layering"}
+        >
+          Comprehensive Group Activity Layering
         </Tab>
         <Tab
           icon={<IconList24 />}

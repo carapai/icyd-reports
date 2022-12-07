@@ -1,4 +1,4 @@
-import { ColumnProps } from "./../interfaces";
+import { ColumnProps, DistrictOption } from "./../interfaces";
 
 import { domain } from "./Domains";
 
@@ -15,3 +15,6 @@ export const addRemoveColumn2 = domain.createEvent<ColumnProps>();
 export const toggleColumns = domain.createEvent<boolean>();
 export const toggleColumns2 = domain.createEvent<boolean>();
 export const setSessions = domain.createEvent<{ [key: string]: string[] }>();
+export const changeCode = domain.createEvent<string>();
+export const setSubCounties = domain.createEvent<{ [key: string]: any[] }>();
+export const setDistricts = domain.createEvent<DistrictOption[]>();

@@ -13,14 +13,14 @@ import {
 } from "@chakra-ui/react";
 import { useStore } from "effector-react";
 import { useEffect, useState } from "react";
-import { useLayering } from "../store/Queries";
+import { useLayering2 } from "../store/Queries";
 import { $store } from "../store/Stores";
 import { innerColumns, otherRows } from "../store/utils";
 
-const DataSetLayerTable = () => {
+const PreventionLayerTable = () => {
   const store = useStore($store);
   const [query, setQuery] = useState<{ [key: string]: any }>({
-    query: `select * from layering`,
+    query: `select * from layering2`,
     fetch_size: 100,
     filter: {
       bool: {
@@ -30,16 +30,6 @@ const DataSetLayerTable = () => {
               ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
             },
           },
-          // {
-          //   term: {
-          //     inactive: false,
-          //   },
-          // },
-          // {
-          //   term: {
-          //     deleted: false,
-          //   },
-          // },
           {
             bool: {
               should: [
@@ -75,7 +65,7 @@ const DataSetLayerTable = () => {
       },
     },
   });
-  const { isLoading, isSuccess, isError, error, data } = useLayering(query);
+  const { isLoading, isSuccess, isError, error, data } = useLayering2(query);
   useEffect(() => {
     let must: any[] = [
       {
@@ -83,16 +73,6 @@ const DataSetLayerTable = () => {
           ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
         },
       },
-      // {
-      //   term: {
-      //     inactive: false,
-      //   },
-      // },
-      // {
-      //   term: {
-      //     deleted: false,
-      //   },
-      // },
       {
         bool: {
           should: [
@@ -130,13 +110,13 @@ const DataSetLayerTable = () => {
         ...must,
         {
           match: {
-            ["HLKc2AKR9jW.keyword"]: store.code,
+            ["ypDUCAS6juy.keyword"]: store.code,
           },
         },
       ];
     }
     setQuery({
-      query: `select * from layering`,
+      query: `select * from layering2`,
       fetch_size: 100,
       filter: {
         bool: {
@@ -147,7 +127,6 @@ const DataSetLayerTable = () => {
   }, [store.period, store.selectedOrgUnits, store.code]);
   return (
     <Stack>
-      {/* <pre>{JSON.stringify(data, null, 2)}</pre> */}
       <Box m="auto" w="100%">
         <Box
           position="relative"
@@ -170,13 +149,10 @@ const DataSetLayerTable = () => {
             <Table variant="simple" size="sm">
               <Thead>
                 <Tr py={1}>
-                  {store.columns
+                  {store.columns2
                     .filter((s) => s.selected)
                     .map((column: any, index: number) => (
-                      <Th
-                        key={`${column.id}${index}`}
-                        {...otherRows(index, column.bg)}
-                      >
+                      <Th key={`${column.id}`} {...otherRows(index, column.bg)}>
                         <Heading as="h6" size="xs" textTransform="none">
                           {column.display}
                         </Heading>
@@ -187,14 +163,14 @@ const DataSetLayerTable = () => {
               <Tbody py={10}>
                 {data.data.map((record: any) => (
                   <Tr key={record.id}>
-                    {store.columns
+                    {store.columns2
                       .filter((s) => s.selected)
                       .map((column, index: number) => (
                         <Td
                           {...innerColumns(index)}
-                          key={`${index}${record.id}${column.id}`}
+                          key={`${record.trackedEntityInstance}${column.id}`}
                         >
-                          {String(record[column.id])}
+                          {record[column.id]}
                         </Td>
                       ))}
                   </Tr>
@@ -217,4 +193,4 @@ const DataSetLayerTable = () => {
   );
 };
 
-export default DataSetLayerTable;
+export default PreventionLayerTable;
