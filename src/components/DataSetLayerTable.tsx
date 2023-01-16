@@ -147,7 +147,6 @@ const DataSetLayerTable = () => {
   }, [store.period, store.selectedOrgUnits, store.code]);
   return (
     <Stack>
-      {/* <pre>{JSON.stringify(data, null, 2)}</pre> */}
       <Box m="auto" w="100%">
         <Box
           position="relative"
