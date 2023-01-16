@@ -72,7 +72,7 @@ const GroupActivityLayer = () => {
     setPageSize(pageSize);
     setCurrentPage(1);
   };
-  
+
   return (
     <Stack p="10px">
       <PreventionLayerFilter />
@@ -208,7 +208,7 @@ const GroupActivityLayer = () => {
             <option value="200">200</option>
           </Select>
         </Center>
-        {isError && <Box>{error.message}</Box>}
+        {isError && <Box>{error?.message}</Box>}
       </Box>
     </Stack>
   );

@@ -7,6 +7,7 @@ import {
   DrawerContent,
   DrawerHeader,
   DrawerOverlay,
+  Input,
   List,
   ListItem,
   Modal,
@@ -23,24 +24,20 @@ import { DatePicker, TreeSelect } from "antd";
 import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
-import { flatten } from "lodash";
-import { ChangeEvent, useRef } from "react";
+import { flatten, fromPairs } from "lodash";
+import { ChangeEvent, useRef, useState } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
 import XLSX from "xlsx";
 import {
   addRemoveColumn2,
+  changeCode,
   changePeriod,
   setSelectedOrgUnits,
   setUserOrgUnits,
   toggleColumns2,
 } from "../../store/Events";
-import { processPrevention } from "../../store/Queries";
-import {
-  $columns2,
-  $financialQuarter,
-  $isChecked,
-  $store,
-} from "../../store/Stores";
+import { api } from "../../store/Queries";
+import { $columns2, $isChecked, $store } from "../../store/Stores";
 
 function s2ab(s: any) {
   let buf = new ArrayBuffer(s.length);
@@ -65,6 +62,8 @@ const createQuery = (parent: any) => {
 
 const ComprehensiveLayerFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
+  const [code, setCode] = useState<string>("");
+
   const {
     isOpen: modalIsOpen,
     onOpen: modalOnOpen,
@@ -73,9 +72,8 @@ const ComprehensiveLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const columns = useStore($columns2);
+  const filteredColumns = useStore($columns2);
   const isChecked = useStore($isChecked);
-  const period = useStore($financialQuarter);
 
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
@@ -111,104 +109,116 @@ const ComprehensiveLayerFilter = () => {
   };
 
   const download = async () => {
-    const query = {
-      instances: {
-        resource: "trackedEntityInstances.json",
-        params: {
-          fields: "*",
-          ou: store.selectedOrgUnits.join(";"),
-          ouMode: "DESCENDANTS",
-          filter: `mWyp85xIzXR:IN:${[
+    let must: any[] = [
+      {
+        term: {
+          ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
+        },
+      },
+      {
+        bool: {
+          should: [
+            {
+              terms: {
+                ["level1.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level2.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level3.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level4.keyword"]: store.selectedOrgUnits,
+              },
+            },
+            {
+              terms: {
+                ["level5.keyword"]: store.selectedOrgUnits,
+              },
+            },
+          ],
+        },
+      },
+      {
+        terms: {
+          "bFnIjGJpf9t.keyword": [
             "SINOVUYO",
             "ECD",
             "Saving and Borrowing",
             "SPM Training",
             "Financial Literacy",
             "VSLA Methodology",
-          ].join(";")}`,
-          page: 1,
-          pageSize: 250,
-          program: "IXxHJADVCkb",
-          totalPages: true,
+          ],
         },
       },
-    };
-
-    const {
-      instances: {
-        trackedEntityInstances,
-        pager: { pageCount },
-      },
-    }: any = await engine.query(query);
-    const processedData = await processPrevention(
-      engine,
-      trackedEntityInstances.filter((a: any) => a.inactive === false),
-      store.sessions,
-      period
-    );
-    let changedColumnData = processedData.map((d) => {
-      return columns.map((c) => d[c.id] || "");
-    });
-
-    if (pageCount > 1) {
-      for (let page = 2; page <= pageCount; page++) {
-        const newQuery = {
-          instances: {
-            resource: "trackedEntityInstances.json",
-            params: {
-              fields: "*",
-              ou: store.selectedOrgUnits.join(";"),
-              ouMode: "DESCENDANTS",
-              filter: `mWyp85xIzXR:IN:${[
-                "MOE Journeys Plus",
-                "MOH Journeys curriculum",
-                "No means No sessions (Boys)",
-                "No means No sessions (Girls)",
-              ].join(";")}`,
-              page,
-              pageSize: 250,
-              program: "IXxHJADVCkb",
-              totalPages: true,
-            },
+    ];
+    if (store.code) {
+      must = [
+        ...must,
+        {
+          match: {
+            ["HLKc2AKR9jW.keyword"]: store.code,
           },
-        };
-        const {
-          instances: { trackedEntityInstances },
-        }: any = await engine.query(newQuery);
-        const processedData = await processPrevention(
-          engine,
-          trackedEntityInstances.filter((a: any) => a.inactive === false),
-          store.sessions,
-          period
+        },
+      ];
+    }
+    let {
+      data: { rows: allRows, columns, cursor: currentCursor },
+    } = await api.post("sql", {
+      query: `select * from layering2`,
+      filter: {
+        bool: {
+          must,
+        },
+      },
+    });
+    let availableRows = allRows.map((r: any) => {
+      return fromPairs(columns.map((c: any, i: number) => [c.name, r[i]]));
+    });
+    if (currentCursor) {
+      do {
+        let {
+          data: { rows, cursor },
+        } = await api.post("sql", { cursor: currentCursor });
+        availableRows = availableRows.concat(
+          rows.map((r: any) => {
+            return fromPairs(
+              columns.map((c: any, i: number) => [c.name, r[i]])
+            );
+          })
         );
-        let allData = processedData.map((d) => {
-          return columns.map((c) => d[c.id] || "");
-        });
-        changedColumnData = [...changedColumnData, ...allData];
-      }
+        currentCursor = cursor;
+      } while (!!currentCursor);
     }
 
     let wb = XLSX.utils.book_new();
     wb.Props = {
-      Title: "Prevention Layering",
-      Subject: "Prevention",
-      Author: "ICYD Uganda",
+      Title: "SheetJS Tutorial",
+      Subject: "Test",
+      Author: "Red Stapler",
       CreatedDate: new Date(),
     };
 
     wb.SheetNames.push("Listing");
-
     let ws = XLSX.utils.aoa_to_sheet([
-      columns.map((c) => c.display),
-      ...changedColumnData,
+      filteredColumns.map((c: any) => c.display),
+      ...availableRows.map((r: any) =>
+        filteredColumns.map((c: any) => r[c.id])
+      ),
     ]);
     wb.Sheets["Listing"] = ws;
 
     const wbout = XLSX.write(wb, { bookType: "xlsx", type: "binary" });
-
     saveAs(
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
-      "prevention.xlsx"
+      "export.xlsx"
     );
     modalOnClose();
   };
@@ -241,6 +251,18 @@ const ComprehensiveLayerFilter = () => {
           onChange={(value: any) => changePeriod(value)}
         />
       </Stack>
+
+      <Stack direction="row" alignItems="center">
+        <Text>Code:</Text>
+        <Input
+          value={code}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            setCode(e.target.value)
+          }
+        />
+      </Stack>
+      <Button onClick={() => changeCode(code)}>Search</Button>
+
       <Spacer />
       <Stack direction="row" spacing={4}>
         <Button
@@ -299,7 +321,6 @@ const ComprehensiveLayerFilter = () => {
                 Choose Columns
               </Checkbox>
             </DrawerHeader>
-
             <DrawerBody>
               <List spacing={3}>
                 {store.columns2.map((c) => (

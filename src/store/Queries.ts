@@ -63,6 +63,7 @@ const risks: { [key: string]: string } = {
 
 export const api = axios.create({
   baseURL: "https://data.icyd.hispuganda.org/api/wal/",
+  // baseURL: "http://localhost:3001/api/wal/",
 });
 
 const prevConditions = [

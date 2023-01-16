@@ -17,7 +17,7 @@ import { useLayering2 } from "../store/Queries";
 import { $store } from "../store/Stores";
 import { innerColumns, otherRows } from "../store/utils";
 
-const PreventionLayerTable = () => {
+const ComprehensiveLayerTable = () => {
   const store = useStore($store);
   const [query, setQuery] = useState<{ [key: string]: any }>({
     query: `select * from layering2`,
@@ -63,7 +63,14 @@ const PreventionLayerTable = () => {
           },
           {
             terms: {
-              "bFnIjGJpf9t.keyword": ["3. Journeys Plus", "4. NMN"],
+              "bFnIjGJpf9t.keyword": [
+                "SINOVUYO",
+                "ECD",
+                "Saving and Borrowing",
+                "SPM Training",
+                "Financial Literacy",
+                "VSLA Methodology",
+              ],
             },
           },
         ],
@@ -111,7 +118,14 @@ const PreventionLayerTable = () => {
       },
       {
         terms: {
-          "bFnIjGJpf9t.keyword": ["3. Journeys Plus", "4. NMN"],
+          "bFnIjGJpf9t.keyword": [
+            "SINOVUYO",
+            "ECD",
+            "Saving and Borrowing",
+            "SPM Training",
+            "Financial Literacy",
+            "VSLA Methodology",
+          ],
         },
       },
     ];
@@ -159,7 +173,7 @@ const PreventionLayerTable = () => {
             <Table variant="simple" size="sm">
               <Thead>
                 <Tr py={1}>
-                  {store.columns2
+                  {store.columns3
                     .filter((s) => s.selected)
                     .map((column: any, index: number) => (
                       <Th key={`${column.id}`} {...otherRows(index, column.bg)}>
@@ -173,7 +187,7 @@ const PreventionLayerTable = () => {
               <Tbody py={10}>
                 {data.data.map((record: any) => (
                   <Tr key={record.id}>
-                    {store.columns2
+                    {store.columns3
                       .filter((s) => s.selected)
                       .map((column, index: number) => (
                         <Td
@@ -203,4 +217,4 @@ const PreventionLayerTable = () => {
   );
 };
 
-export default PreventionLayerTable;
+export default ComprehensiveLayerTable;

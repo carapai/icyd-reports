@@ -55,6 +55,13 @@ export const Navigation = () => {
         >
           OVC MIS Form 100 Report
         </Tab>
+        <Tab
+          icon={<IconFile24 />}
+          onClick={() => changeLink("/vsla-line-list")}
+          selected={active === "/vsla-line-list"}
+        >
+          VSLA Line List
+        </Tab>
         {/* <Tab
           icon={<IconFile24 />}
           onClick={() => changeLink("/reports")}

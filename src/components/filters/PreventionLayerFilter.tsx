@@ -153,6 +153,11 @@ const PreventionLayerFilter = () => {
           ],
         },
       },
+      {
+        terms: {
+          "bFnIjGJpf9t.keyword": ["3. Journeys Plus", "4. NMN"],
+        },
+      },
     ];
     if (store.code) {
       must = [
