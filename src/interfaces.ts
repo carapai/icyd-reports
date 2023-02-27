@@ -1,3 +1,4 @@
+import { Dayjs } from "dayjs";
 import { OptionBase } from "chakra-react-select";
 export interface Column {
   display: string;
@@ -13,14 +14,17 @@ export interface Store {
   selectedProgram: string;
   program: any;
   total: number;
-  period?: any;
+  period: Dayjs;
   columns: Column[];
   columns2: Column[];
   columns3: Column[];
+  columns4: Column[];
   sessions: { [key: string]: string[] };
   code: string;
   subCounties: { [key: string]: any[] };
   districts: DistrictOption[];
+  currentProgram: { [key: string]: any[] };
+  currentStage: string;
 }
 
 export interface ColumnProps {

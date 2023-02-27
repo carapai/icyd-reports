@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import { Stack } from "@chakra-ui/react";
 import { useDownloadExcel } from "react-export-table-to-excel";
-import moment from "moment";
+import dayjs, { Dayjs } from "dayjs";
 import OVCMISReportFilter from "../components/filters/OVCMISReportFilter";
 import OVCMISTable from "../components/OVCMISTable";
 import { DistrictOption, Option } from "../interfaces";
@@ -9,7 +9,7 @@ import { useStore } from "effector-react";
 import { $store } from "../store/Stores";
 const OVCMISReport = () => {
   const store = useStore($store);
-  const [period, setPeriod] = useState<any>(moment());
+  const [period, setPeriod] = useState<Dayjs | null>(dayjs());
   const [districts, setDistricts] = useState<DistrictOption[]>(() => {
     if (store.districts.length > 0) {
       return store.districts.slice(0, 1);

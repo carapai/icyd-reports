@@ -2849,3 +2849,83 @@ export const districts = [
   //   district: "SEMBABULE",
   // },
 ];
+
+export const columns4: Column[] = [
+  { selected: true, display: "Member Code", id: "HLKc2AKR9jW" },
+  { selected: true, display: "Name", id: "huFucxA3e5c" },
+  { selected: true, display: "Sex", id: "CfpoFtRmK1z" },
+  { selected: true, display: "District", id: "district" },
+  { selected: true, display: "Sub-County", id: "subCounty" },
+  { selected: true, display: "Parish", id: "parish" },
+  { selected: true, display: "VSLA.Group Name", id: "Qm1A7Ot2OTQ" },
+
+  { selected: true, display: "VSLA.MIS Number", id: "mSh07fWXuxX" },
+
+  { selected: true, display: "VSLA.Share Value in UGX", id: "Gne81yYoFOW" },
+
+  {
+    selected: true,
+    display: "VSLA.Number of Active Beneficiaries",
+    id: "nXnA8N98dCu",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.Date of data collection",
+    id: "fDg3QtVjDNb",
+  },
+
+  { selected: true, display: "VSLA.Reporting Month", id: "qaZSoTRHwW9" },
+
+  {
+    selected: true,
+    display: "VSLA.Total Shares Bought this cycle",
+    id: "x8BMFjQ1DRf",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.Member Cumulative Savings this cycle",
+    id: "H5vsW6LYFhy",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.Member Cumulative Loans Taken this cycle(in UGX)",
+    id: "s4w6hTytt5h",
+  },
+
+  { selected: true, display: "VSLA.Purpose of the Loan", id: "AMVNNVkM6dc" },
+
+  {
+    selected: true,
+    display:
+      "VSLA.Member Cumulative Social/Welfare Fund Fund Accessed this Cycle",
+    id: "tZvlWl0BqO7",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.Purpose of Social/Welfare Fund",
+    id: "bRDt9a8xPRi",
+  },
+
+  {
+    selected: true,
+    display:
+      "VSLA.Member Cumulative OVC Protection Fund Contribution this cycle",
+    id: "qEeXNzlJkN8",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.OVC protection Fund Accessed this Cycle in UGX",
+    id: "NyAyKHrhalx",
+  },
+
+  {
+    selected: true,
+    display: "VSLA.Purpose of OVC protection Fund",
+    id: "GUadpWyWyhF",
+  },
+];

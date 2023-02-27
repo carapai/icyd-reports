@@ -1,24 +1,31 @@
-import { columns, columns2, columns3 } from "./Constants";
-import { Store } from "../interfaces";
+import dayjs from "dayjs";
+import { every } from "lodash";
+import { Column, Option, Store } from "../interfaces";
+import { columns, columns2, columns3, columns4 } from "./Constants";
 import { domain } from "./Domains";
 import {
-  setUserOrgUnits,
-  setSelectedOrgUnits,
-  changeRelationshipTypes,
-  setProgram,
-  changeTotal,
-  changePeriod,
   addRemoveColumn,
-  toggleColumns,
-  setSessions,
   addRemoveColumn2,
-  toggleColumns2,
+  addRemoveColumn3,
+  addRemoveColumn4,
   changeCode,
-  setSubCounties,
+  changePeriod,
+  changeRelationshipTypes,
+  changeTotal,
+  setColumn4,
+  setCurrentProgram,
+  setCurrentStage,
   setDistricts,
+  setProgram,
+  setSelectedOrgUnits,
+  setSessions,
+  setSubCounties,
+  setUserOrgUnits,
+  toggleColumns,
+  toggleColumns2,
+  toggleColumns3,
+  toggleColumns4,
 } from "./Events";
-import moment from "moment";
-import { every } from "lodash";
 import { calculateQuarter } from "./utils";
 
 export const $store = domain
@@ -30,14 +37,17 @@ export const $store = domain
     selectedProgram: "RDEklSXCD4C",
     program: {},
     total: 0,
-    period: moment(),
+    period: dayjs(),
     columns: columns,
     columns2: columns2,
     columns3: columns3,
+    columns4: [],
     sessions: {},
     code: "",
     subCounties: {},
     districts: [],
+    currentProgram: {},
+    currentStage: "",
   })
   .on(setUserOrgUnits, (state, userOrgUnits) => {
     return { ...state, userOrgUnits };
@@ -75,6 +85,24 @@ export const $store = domain
     });
     return { ...state, columns2: processed };
   })
+  .on(addRemoveColumn3, (state, { id, value }) => {
+    const processed = state.columns3.map((column) => {
+      if (id === column.id) {
+        return { ...column, selected: value };
+      }
+      return column;
+    });
+    return { ...state, columns3: processed };
+  })
+  .on(addRemoveColumn4, (state, { id, value }) => {
+    const processed = state.columns4.map((column) => {
+      if (id === column.id) {
+        return { ...column, selected: value };
+      }
+      return column;
+    });
+    return { ...state, columns4: processed };
+  })
   .on(toggleColumns, (state, value) => {
     const processed = state.columns.map((column) => {
       return { ...column, selected: value };
@@ -87,6 +115,18 @@ export const $store = domain
     });
     return { ...state, columns2: processed };
   })
+  .on(toggleColumns3, (state, value) => {
+    const processed = state.columns3.map((column) => {
+      return { ...column, selected: value };
+    });
+    return { ...state, columns2: processed };
+  })
+  .on(toggleColumns4, (state, value) => {
+    const processed = state.columns4.map((column) => {
+      return { ...column, selected: value };
+    });
+    return { ...state, columns4: processed };
+  })
   .on(setSessions, (state, sessions) => {
     return { ...state, sessions };
   })
@@ -98,6 +138,15 @@ export const $store = domain
   })
   .on(setDistricts, (state, districts) => {
     return { ...state, districts };
+  })
+  .on(setCurrentProgram, (state, currentProgram) => {
+    return { ...state, currentProgram };
+  })
+  .on(setCurrentStage, (state, currentStage) => {
+    return { ...state, currentStage };
+  })
+  .on(setColumn4, (state, columns4) => {
+    return { ...state, columns4 };
   });
 
 export const $columns = $store.map((state) => {
@@ -105,6 +154,24 @@ export const $columns = $store.map((state) => {
 });
 export const $columns2 = $store.map((state) => {
   return state.columns2.filter((c) => c.selected);
+});
+
+export const $stages = $store.map((state) => {
+  return (
+    state.currentProgram?.programStages?.map(({ id, name }: any) => {
+      const a: Option = {
+        value: id,
+        label: name,
+      };
+      return a;
+    }) || []
+  );
+});
+export const $columns4 = $store.map((state) => {
+  return state.columns4.filter((c) => c.selected);
+});
+export const $columns3 = $store.map((state) => {
+  return state.columns3.filter((c) => c.selected);
 });
 
 export const $isChecked = $store.map((state) => {

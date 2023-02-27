@@ -21,7 +21,6 @@ import {
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, Input, TreeSelect } from "antd";
-import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
 import { flatten, fromPairs } from "lodash";
@@ -223,7 +222,7 @@ const DataSetLayerFilter = () => {
         <DatePicker
           picker="quarter"
           value={store.period}
-          onChange={(value: any) => changePeriod(value)}
+          onChange={(value) => changePeriod(value)}
         />
       </Stack>
       <Stack direction="row" alignItems="center">

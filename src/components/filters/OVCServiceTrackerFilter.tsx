@@ -1,6 +1,7 @@
-import { Button, Spacer, Stack, Text } from "@chakra-ui/react";
+import { Stack, Text } from "@chakra-ui/react";
 import { DatePicker } from "antd";
 import { GroupBase, Select } from "chakra-react-select";
+import { Dayjs } from "dayjs";
 import { useStore } from "effector-react";
 import { DistrictOption } from "../../interfaces";
 import { $store } from "../../store/Stores";
@@ -8,8 +9,8 @@ import { $store } from "../../store/Stores";
 type OVCServiceTrackerFilterProps = {
   districts: DistrictOption[];
   onDistrictChange: (district: DistrictOption[]) => void;
-  period: any;
-  onPeriodChange: (period: any) => void;
+  period: Dayjs | null;
+  onPeriodChange: (period: Dayjs | null) => void;
 };
 
 const OVCServiceTrackerFilter = ({

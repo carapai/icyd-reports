@@ -21,7 +21,6 @@ import {
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, TreeSelect } from "antd";
-import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
 import { flatten, fromPairs } from "lodash";
@@ -29,15 +28,15 @@ import { ChangeEvent, useRef, useState } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
 import XLSX from "xlsx";
 import {
-  addRemoveColumn2,
+  addRemoveColumn3,
   changeCode,
   changePeriod,
   setSelectedOrgUnits,
   setUserOrgUnits,
-  toggleColumns2,
+  toggleColumns3,
 } from "../../store/Events";
 import { api } from "../../store/Queries";
-import { $columns2, $isChecked, $store } from "../../store/Stores";
+import { $columns3, $isChecked, $store } from "../../store/Stores";
 
 function s2ab(s: any) {
   let buf = new ArrayBuffer(s.length);
@@ -72,7 +71,7 @@ const ComprehensiveLayerFilter = () => {
   const store = useStore($store);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const filteredColumns = useStore($columns2);
+  const filteredColumns = useStore($columns3);
   const isChecked = useStore($isChecked);
 
   const loadOrganisationUnitsChildren = async (parent: any) => {
@@ -149,12 +148,11 @@ const ComprehensiveLayerFilter = () => {
       {
         terms: {
           "bFnIjGJpf9t.keyword": [
-            "SINOVUYO",
-            "ECD",
-            "Saving and Borrowing",
-            "SPM Training",
-            "Financial Literacy",
-            "VSLA Methodology",
+            "1. VSLA Group",
+            "2. Sinovuyo",
+            "5. Stepping Stones",
+            "6. Other (Specify)",
+            "7. Early Childhood Development (ECD)",
           ],
         },
       },
@@ -164,7 +162,7 @@ const ComprehensiveLayerFilter = () => {
         ...must,
         {
           match: {
-            ["HLKc2AKR9jW.keyword"]: store.code,
+            ["ypDUCAS6juy.keyword"]: store.code,
           },
         },
       ];
@@ -315,7 +313,7 @@ const ComprehensiveLayerFilter = () => {
               <Checkbox
                 isChecked={isChecked}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  toggleColumns2(e.target.checked)
+                  toggleColumns3(e.target.checked)
                 }
               >
                 Choose Columns
@@ -323,12 +321,12 @@ const ComprehensiveLayerFilter = () => {
             </DrawerHeader>
             <DrawerBody>
               <List spacing={3}>
-                {store.columns2.map((c) => (
+                {store.columns3.map((c) => (
                   <ListItem key={c.display}>
                     <Checkbox
                       isChecked={c.selected}
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        addRemoveColumn2({ value: e.target.checked, id: c.id })
+                        addRemoveColumn3({ value: e.target.checked, id: c.id })
                       }
                     >
                       {c.display}

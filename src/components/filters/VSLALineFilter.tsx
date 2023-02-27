@@ -17,33 +17,27 @@ import {
   Stack,
   Text,
   useDisclosure,
-  Input,
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
-import { DatePicker, TreeSelect } from "antd";
-import { useState } from "react";
+import { TreeSelect } from "antd";
+import { GroupBase, Select } from "chakra-react-select";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
-import { flatten, fromPairs } from "lodash";
+import { flatten, fromPairs, uniq } from "lodash";
 import { ChangeEvent, useRef } from "react";
 import { MdFileDownload, MdFilterList } from "react-icons/md";
 import XLSX from "xlsx";
+import { Column, Option } from "../../interfaces";
 import {
-  addRemoveColumn2,
-  changePeriod,
-  setSelectedOrgUnits,
+  addRemoveColumn4,
+  setColumn4,
+  setCurrentStage,
   setUserOrgUnits,
-  toggleColumns2,
-  changeCode,
+  toggleColumns4,
+  setSelectedOrgUnits,
 } from "../../store/Events";
-import { processPrevention } from "../../store/Queries";
 import { api } from "../../store/Queries";
-import {
-  $columns2,
-  $financialQuarter,
-  $isChecked,
-  $store,
-} from "../../store/Stores";
+import { $columns4, $isChecked, $stages, $store } from "../../store/Stores";
 
 function s2ab(s: any) {
   let buf = new ArrayBuffer(s.length);
@@ -58,7 +52,8 @@ const createQuery = (parent: any) => {
       resource: `organisationUnits.json`,
       params: {
         filter: `id:in:[${parent.id}]`,
-        paging: "false",
+        // paging: "false",
+        skipPaging: "true",
         order: "shortName:desc",
         fields: "children[id,name,path,leaf]",
       },
@@ -66,19 +61,18 @@ const createQuery = (parent: any) => {
   };
 };
 
-const PreventionLayerFilter = () => {
+const VSLALineFilter = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
-  const [code, setCode] = useState<string>("");
-
   const {
     isOpen: modalIsOpen,
     onOpen: modalOnOpen,
     onClose: modalOnClose,
   } = useDisclosure();
   const store = useStore($store);
+  const stages = useStore($stages);
   const btnRef = useRef<any>();
   const engine = useDataEngine();
-  const filteredColumns = useStore($columns2);
+  const filteredColumns = useStore($columns4);
   const isChecked = useStore($isChecked);
 
   const loadOrganisationUnitsChildren = async (parent: any) => {
@@ -117,11 +111,6 @@ const PreventionLayerFilter = () => {
   const download = async () => {
     let must: any[] = [
       {
-        term: {
-          ["qtr.keyword"]: store.period.format("YYYY[Q]Q"),
-        },
-      },
-      {
         bool: {
           should: [
             {
@@ -153,25 +142,15 @@ const PreventionLayerFilter = () => {
         },
       },
       {
-        terms: {
-          "bFnIjGJpf9t.keyword": ["3. Journeys Plus", "4. NMN"],
+        exists: {
+          field: "eventDate",
         },
       },
     ];
-    if (store.code) {
-      must = [
-        ...must,
-        {
-          match: {
-            ["ypDUCAS6juy.keyword"]: store.code,
-          },
-        },
-      ];
-    }
     let {
       data: { rows: allRows, columns, cursor: currentCursor },
     } = await api.post("sql", {
-      query: `select * from layering2`,
+      query: `select * from ${String(store.currentStage).toLowerCase()}`,
       filter: {
         bool: {
           must,
@@ -181,18 +160,143 @@ const PreventionLayerFilter = () => {
     let availableRows = allRows.map((r: any) => {
       return fromPairs(columns.map((c: any, i: number) => [c.name, r[i]]));
     });
+
+    const instances = uniq(
+      availableRows.map((d: any) => d.trackedEntityInstance)
+    );
+    const orgUnits = uniq(availableRows.map((d: any) => d.orgUnit));
+
+    const query3 = {
+      units: {
+        resource: "organisationUnits.json",
+        params: {
+          filter: `id:in:[${orgUnits.join(",")}]`,
+          fields: "id,name,parent[id,name,parent[id,name]]",
+        },
+      },
+    };
+    const query2 = {
+      query: `select * from rdeklsxcd4c`,
+      filter: {
+        terms: {
+          [`trackedEntityInstance.keyword`]: instances,
+        },
+      },
+    };
+
+    const {
+      data: { columns: columns1, rows: rows1 },
+    } = await api.post("sql", query2);
+
+    const {
+      units: { organisationUnits },
+    }: any = await engine.query(query3);
+
+    const organisations = fromPairs<Object>(
+      organisationUnits.map(({ id, name, parent }: any) => {
+        return [
+          id,
+          {
+            parish: name,
+            subCounty: parent.name,
+            district: parent.parent.name,
+          },
+        ];
+      })
+    );
+
+    const results = fromPairs<Object>(
+      rows1
+        .map((r: any) => {
+          return fromPairs(columns1.map((c: any, i: number) => [c.name, r[i]]));
+        })
+        .map(({ trackedEntityInstance, ...rest }: any) => {
+          return [trackedEntityInstance, rest];
+        })
+    );
+
+    availableRows = availableRows.map((d: any) => {
+      return {
+        ...d,
+        ...results[d.trackedEntityInstance],
+        ...organisations[d.orgUnit],
+      };
+    });
+
     if (currentCursor) {
       do {
         let {
           data: { rows, cursor },
         } = await api.post("sql", { cursor: currentCursor });
-        availableRows = availableRows.concat(
-          rows.map((r: any) => {
-            return fromPairs(
-              columns.map((c: any, i: number) => [c.name, r[i]])
-            );
+
+        let currentRows = rows.map((r: any) => {
+          return fromPairs(columns.map((c: any, i: number) => [c.name, r[i]]));
+        });
+
+        const instances = uniq(
+          currentRows.map((d: any) => d.trackedEntityInstance)
+        );
+        const orgUnits = uniq(currentRows.map((d: any) => d.orgUnit));
+
+        const query3 = {
+          units: {
+            resource: "organisationUnits.json",
+            params: {
+              filter: `id:in:[${orgUnits.join(",")}]`,
+              fields: "id,name,parent[id,name,parent[id,name]]",
+            },
+          },
+        };
+        const query2 = {
+          query: `select * from rdeklsxcd4c`,
+          filter: {
+            terms: {
+              [`trackedEntityInstance.keyword`]: instances,
+            },
+          },
+        };
+
+        const {
+          data: { columns: columns1, rows: rows1 },
+        } = await api.post("sql", query2);
+
+        const {
+          units: { organisationUnits },
+        }: any = await engine.query(query3);
+
+        const organisations = fromPairs<Object>(
+          organisationUnits.map(({ id, name, parent }: any) => {
+            return [
+              id,
+              {
+                parish: name,
+                subCounty: parent.name,
+                district: parent.parent.name,
+              },
+            ];
           })
         );
+
+        const results = fromPairs<Object>(
+          rows1
+            .map((r: any) => {
+              return fromPairs(
+                columns1.map((c: any, i: number) => [c.name, r[i]])
+              );
+            })
+            .map(({ trackedEntityInstance, ...rest }: any) => {
+              return [trackedEntityInstance, rest];
+            })
+        );
+
+        currentRows = currentRows.map((d: any) => {
+          return {
+            ...d,
+            ...results[d.trackedEntityInstance],
+            ...organisations[d.orgUnit],
+          };
+        });
+        availableRows = availableRows.concat(currentRows);
         currentCursor = cursor;
       } while (!!currentCursor);
     }
@@ -213,7 +317,6 @@ const PreventionLayerFilter = () => {
       ),
     ]);
     wb.Sheets["Listing"] = ws;
-
     const wbout = XLSX.write(wb, { bookType: "xlsx", type: "binary" });
     saveAs(
       new Blob([s2ab(wbout)], { type: "application/octet-stream" }),
@@ -223,7 +326,47 @@ const PreventionLayerFilter = () => {
   };
 
   return (
-    <Stack direction="row" spacing="30px">
+    <Stack direction="row" spacing="30px" alignItems="center">
+      <Text>Program Stage</Text>
+      <Stack zIndex={10000} w="500px">
+        <Select<Option, false, GroupBase<Option>>
+          options={stages}
+          isClearable
+          value={stages.find((d) => d.value === store.currentStage)}
+          onChange={(e) => {
+            setCurrentStage(e?.value || "");
+            const attributes =
+              store.currentProgram.programTrackedEntityAttributes.map(
+                ({ trackedEntityAttribute }: any) => {
+                  const display = trackedEntityAttribute.name;
+                  const id = trackedEntityAttribute.id;
+                  return { id, display, selected: true } as Column;
+                }
+              );
+            if (e?.value) {
+              const stage = store.currentProgram.programStages?.find(
+                ({ id }: any) => id === e.value
+              );
+              if (stage) {
+                const initialColumns = stage.programStageDataElements.map(
+                  ({ dataElement }: any) => {
+                    const display = dataElement.name;
+                    const id = dataElement.id;
+                    return { id, display, selected: true } as Column;
+                  }
+                );
+                setColumn4([
+                  ...attributes,
+                  { display: "District", id: "district", selected: true },
+                  { display: "Sub-county", id: "subCounty", selected: true },
+                  { display: "Parish", id: "orgUnitName", selected: true },
+                  ...initialColumns,
+                ]);
+              }
+            }
+          }}
+        />
+      </Stack>
       <Stack direction="row" alignItems="center">
         <Text>Select Organisation:</Text>
         <TreeSelect
@@ -242,26 +385,6 @@ const PreventionLayerFilter = () => {
           treeData={store.userOrgUnits}
         />
       </Stack>
-      <Stack direction="row" alignItems="center">
-        <Text>Quarter:</Text>
-        <DatePicker
-          picker="quarter"
-          value={store.period}
-          onChange={(value: any) => changePeriod(value)}
-        />
-      </Stack>
-
-      <Stack direction="row" alignItems="center">
-        <Text>Code:</Text>
-        <Input
-          value={code}
-          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-            setCode(e.target.value)
-          }
-        />
-      </Stack>
-      <Button onClick={() => changeCode(code)}>Search</Button>
-
       <Spacer />
       <Stack direction="row" spacing={4}>
         <Button
@@ -284,7 +407,6 @@ const PreventionLayerFilter = () => {
         >
           Download
         </Button>
-
         <Modal isOpen={modalIsOpen} onClose={modalOnClose} isCentered>
           <ModalOverlay />
           <ModalContent bg="none" boxShadow="none" textColor="white">
@@ -314,7 +436,7 @@ const PreventionLayerFilter = () => {
               <Checkbox
                 isChecked={isChecked}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                  toggleColumns2(e.target.checked)
+                  toggleColumns4(e.target.checked)
                 }
               >
                 Choose Columns
@@ -322,12 +444,12 @@ const PreventionLayerFilter = () => {
             </DrawerHeader>
             <DrawerBody>
               <List spacing={3}>
-                {store.columns2.map((c) => (
+                {store.columns4.map((c: any) => (
                   <ListItem key={c.display}>
                     <Checkbox
                       isChecked={c.selected}
                       onChange={(e: ChangeEvent<HTMLInputElement>) =>
-                        addRemoveColumn2({ value: e.target.checked, id: c.id })
+                        addRemoveColumn4({ value: e.target.checked, id: c.id })
                       }
                     >
                       {c.display}
@@ -343,4 +465,4 @@ const PreventionLayerFilter = () => {
   );
 };
 
-export default PreventionLayerFilter;
+export default VSLALineFilter;

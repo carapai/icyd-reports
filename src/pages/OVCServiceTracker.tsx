@@ -1,12 +1,13 @@
 import { Stack } from "@chakra-ui/react";
 import { useState } from "react";
-import moment from "moment";
+import dayjs, { Dayjs } from "dayjs";
+
 import OVCServiceTrackerFilter from "../components/filters/OVCServiceTrackerFilter";
 import OVCServiceTrackerTable from "../components/OVCServiceTrackerTable";
 import { DistrictOption } from "../interfaces";
 
 const OVCServiceTracker = () => {
-  const [period, setPeriod] = useState<any>(moment());
+  const [period, setPeriod] = useState<Dayjs | null>(dayjs());
   const [districts, setDistricts] = useState<DistrictOption[]>([]);
   return (
     <Stack p="10px">

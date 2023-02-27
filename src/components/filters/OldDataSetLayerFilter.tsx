@@ -22,7 +22,7 @@ import {
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, Input, TreeSelect } from "antd";
-import "antd/dist/antd.css";
+import dayjs, { Dayjs } from "dayjs";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
 import { flatten } from "lodash";
@@ -81,7 +81,7 @@ const OldDataSetLayerFilter = () => {
   const engine = useDataEngine();
   const columns = useStore($columns);
   const isChecked = useStore($isChecked);
-  const previousQuarter = moment(store.period.clone()).subtract(1, "quarter");
+  const previousQuarter = store.period.subtract(1, "quarter");
   const loadOrganisationUnitsChildren = async (parent: any) => {
     try {
       const {

@@ -1,8 +1,8 @@
-import React from "react";
 import { Stack } from "@chakra-ui/react";
+import React from "react";
 import ComprehensiveLayerTable from "../components/ComprehensiveLayerTable";
 import ComprehensiveLayerFilter from "../components/filters/ComprehensiveLayerFilter";
-const PreventionLayer = () => {
+const ComprehensiveLayer = () => {
   return (
     <Stack p="10px">
       <ComprehensiveLayerFilter />
@@ -10,4 +10,4 @@ const PreventionLayer = () => {
     </Stack>
   );
 };
-export default PreventionLayer;
+export default ComprehensiveLayer;

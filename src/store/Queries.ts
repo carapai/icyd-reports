@@ -1,5 +1,8 @@
-import { DistrictOption } from "./../interfaces";
+import { Column, DistrictOption } from "./../interfaces";
 import { useDataEngine } from "@dhis2/app-runtime";
+import quarterOfYear from "dayjs/plugin/quarterOfYear";
+import dayjs, { Dayjs } from "dayjs";
+
 import {
   differenceInMonths,
   differenceInYears,
@@ -31,6 +34,9 @@ const kampalaDivisions = [
 ];
 import {
   changeTotal,
+  setColumn4,
+  setCurrentProgram,
+  setCurrentStage,
   setDistricts,
   setSelectedOrgUnits,
   setSessions,
@@ -46,6 +52,8 @@ import {
 } from "./utils";
 import { Option } from "../interfaces";
 import { districts, indicatorReportColumns } from "./Constants";
+
+dayjs.extend(quarterOfYear);
 
 const computePercentage = (numerator: number, denominator: number) => {
   if (denominator !== 0) {
@@ -185,7 +193,7 @@ const mapping: any = {
     "Completed NMN Boys New Curriculum",
 
   SINOVUYO: "Completed SINOVUYO",
-  ECD: "Completed SINOVUYO",
+  ECD: "Completed ECD",
   "Saving and Borrowing": "Completed Saving and Borrowing",
   "SPM Training": "Completed SPM Training",
   "Financial Literacy": "Completed Financial Literacy",
@@ -193,13 +201,13 @@ const mapping: any = {
 };
 const mapping2: any = {
   "MOE Journeys Plus": 18,
-  "MOH Journeys curriculum": 18,
+  "MOH Journeys curriculum": 22,
   "No means No sessions (Boys)": 4,
-  "No means No sessions (Girls)": 5,
+  "No means No sessions (Girls)": 4,
   "No means No sessions (Boys) New Curriculum": 8,
-  SINOVUYO: 10,
+  SINOVUYO: 14,
 
-  ECD: 5,
+  ECD: 8,
   "Saving and Borrowing": 6,
   "SPM Training": 5,
   "Financial Literacy": 4,
@@ -621,6 +629,13 @@ export function useLoader() {
         fields: "id,name,parent[id,name]",
       },
     },
+    program: {
+      resource: "programs/RDEklSXCD4C.json",
+      params: {
+        fields:
+          "programTrackedEntityAttributes[trackedEntityAttribute[id,name]],programStages[id,name,programStageDataElements[dataElement[id,name]]]",
+      },
+    },
   };
   return useQuery<any, Error>("sqlViews", async () => {
     const {
@@ -641,6 +656,7 @@ export function useLoader() {
       SAVING: { options: options11 },
       districts: { organisationUnits: foundDistricts },
       subCounties: { organisationUnits: counties },
+      program,
     }: any = await engine.query(query);
     const processedUnits = dataViewOrganisationUnits.map((unit: any) => {
       return {
@@ -732,6 +748,31 @@ export function useLoader() {
       })
     );
     setSubCounties(processedSubCounties);
+    setCurrentProgram(program);
+    const stage = program.programStages[0];
+    const initialColumns = stage.programStageDataElements.map(
+      ({ dataElement }: any) => {
+        const display = dataElement.name;
+        const id = dataElement.id;
+        return { id, display, selected: true } as Column;
+      }
+    );
+    const attributes = program.programTrackedEntityAttributes.map(
+      ({ trackedEntityAttribute }: any) => {
+        const display = trackedEntityAttribute.name;
+        const id = trackedEntityAttribute.id;
+        return { id, display, selected: true } as Column;
+      }
+    );
+    setCurrentStage(stage.id);
+    setColumn4([
+      ...attributes,
+      { display: "District", id: "district", selected: true },
+      { display: "Sub-county", id: "subCounty", selected: true },
+      { display: "Parish", id: "orgUnitName", selected: true },
+      ,
+      ...initialColumns,
+    ]);
     return true;
   });
 }
@@ -962,7 +1003,7 @@ export const processPrevention = async (
 export const processInstances = (
   program: string,
   trackedEntityInstances: any[],
-  period: moment.Moment,
+  period: Dayjs,
   sessions: { [key: string]: string[] },
   indexCases: { [key: string]: any },
   processedUnits: { [key: string]: any },
@@ -2860,7 +2901,7 @@ export const useTracker = (
         const servedPreviousQuarter = processInstances(
           program,
           filteredInstances,
-          moment(period).subtract(1, "quarter"),
+          period.subtract(1, "quarter"),
           sessions,
           indexCases,
           processedUnits,
@@ -2933,6 +2974,92 @@ export const useLayering2 = (query: { [key: string]: any }) => {
       };
     }
   );
+};
+
+export const useLayeringVSLA = (
+  query: { [key: string]: any },
+  stage: string
+) => {
+  const engine = useDataEngine();
+  const key = Buffer.from(JSON.stringify(query)).toString("base64");
+  return useQuery<any, Error>(["VSLA", stage, key], async () => {
+    console.log(query);
+    const {
+      data: { columns, rows, cursor },
+    } = await api.post("sql", {
+      ...query,
+      query: `select * from ${String(stage).toLowerCase()}`,
+    });
+
+    if (columns) {
+      realColumns = columns;
+    }
+
+    const data = rows.map((r: any) => {
+      return fromPairs(realColumns.map((c: any, i: number) => [c.name, r[i]]));
+    });
+    const instances = uniq(data.map((d: any) => d.trackedEntityInstance));
+    const orgUnits = uniq(data.map((d: any) => d.orgUnit));
+
+    const query3 = {
+      units: {
+        resource: "organisationUnits.json",
+        params: {
+          filter: `id:in:[${orgUnits.join(",")}]`,
+          fields: "id,name,parent[id,name,parent[id,name]]",
+        },
+      },
+    };
+    const query2 = {
+      query: `select * from rdeklsxcd4c`,
+      filter: {
+        terms: {
+          [`trackedEntityInstance.keyword`]: instances,
+        },
+      },
+    };
+
+    const {
+      data: { columns: columns1, rows: rows1 },
+    } = await api.post("sql", query2);
+
+    const {
+      units: { organisationUnits },
+    }: any = await engine.query(query3);
+
+    const organisations = fromPairs<Object>(
+      organisationUnits.map(({ id, name, parent }: any) => {
+        return [
+          id,
+          {
+            parish: name,
+            subCounty: parent.name,
+            district: parent.parent.name,
+          },
+        ];
+      })
+    );
+
+    const results = fromPairs<Object>(
+      rows1
+        .map((r: any) => {
+          return fromPairs(columns1.map((c: any, i: number) => [c.name, r[i]]));
+        })
+        .map(({ trackedEntityInstance, ...rest }: any) => {
+          return [trackedEntityInstance, rest];
+        })
+    );
+    return {
+      cursor,
+      data: data.map((d: any) => {
+        return {
+          ...d,
+          ...results[d.trackedEntityInstance],
+          ...organisations[d.orgUnit],
+        };
+      }),
+    };
+  });
 };
 
 export const useOVCHMIS = (districts: Option[], period: any) => {
@@ -5429,6 +5556,10 @@ const computeOVCServiceTracker = async (
   districts: any[],
   level: string
 ) => {
+  const q = period.quarter();
+  const year = period.year();
+
+  const allQuarters = findQuarters(year, q);
   let must: any[] = [
     {
       match: {
@@ -5441,6 +5572,8 @@ const computeOVCServiceTracker = async (
       },
     },
   ];
+
+  console.log(period.format());
 
   const must2 = [
     {
@@ -5488,8 +5621,8 @@ const computeOVCServiceTracker = async (
         bool: {
           must: [
             {
-              term: {
-                "qtr.keyword": period.format("YYYY[Q]Q"),
+              terms: {
+                "qtr.keyword": allQuarters,
               },
             },
             {

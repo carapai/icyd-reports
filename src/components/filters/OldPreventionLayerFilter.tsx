@@ -20,7 +20,6 @@ import {
 } from "@chakra-ui/react";
 import { useDataEngine } from "@dhis2/app-runtime";
 import { DatePicker, TreeSelect } from "antd";
-import "antd/dist/antd.css";
 import { useStore } from "effector-react";
 import { saveAs } from "file-saver";
 import { flatten } from "lodash";

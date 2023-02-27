@@ -9,6 +9,8 @@ import {
   Button,
   Spacer,
 } from "@chakra-ui/react";
+import dayjs, { Dayjs } from "dayjs";
+
 import { DatePicker } from "antd";
 import { GroupBase, Select } from "chakra-react-select";
 import { useStore } from "effector-react";
@@ -18,8 +20,8 @@ import { $store } from "../../store/Stores";
 type OVCMISReportFilterProps = {
   districts: DistrictOption[];
   onDistrictChange: (selected: DistrictOption[]) => void;
-  period: any;
-  onPeriodChange: (period: any) => void;
+  period: Dayjs | null;
+  onPeriodChange: (period: Dayjs) => void;
   onDownload: () => boolean;
 };
 
